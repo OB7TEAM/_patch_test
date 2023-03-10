@@ -25716,7 +25716,6 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Sprite.prototype.acts.SetAngle,
 	cr.plugins_.Audio.prototype.cnds.PreloadsComplete,
 	cr.plugins_.Audio.prototype.acts.PlayByName,
-	cr.plugins_.Rex_Function.prototype.acts.InjectJSFunctionObjects,
 	cr.system_object.prototype.cnds.PickAll,
 	cr.plugins_.Sprite.prototype.acts.StopAnim,
 	cr.plugins_.Spritefont2.prototype.cnds.PickByUID,
@@ -25764,6 +25763,7 @@ cr.getObjectRefTable = function () { return [
 	cr.system_object.prototype.cnds.CompareVar,
 	cr.system_object.prototype.acts.ResetGlobals,
 	cr.system_object.prototype.acts.RestartLayout,
+	cr.plugins_.Rex_Function.prototype.acts.InjectJSFunctionObjects,
 	cr.system_object.prototype.exps.clamp,
 	cr.plugins_.Sprite.prototype.exps.AnimationFrameCount,
 	cr.plugins_.Sprite.prototype.acts.SetMirrored,
@@ -25836,5 +25836,6 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Keyboard.prototype.cnds.OnKey,
 	cr.plugins_.WebStorage.prototype.acts.ClearLocal,
 	cr.plugins_.WebStorage.prototype.acts.ClearSession,
-	cr.system_object.prototype.acts.ResetPersisted
+	cr.system_object.prototype.acts.ResetPersisted,
+	cr.system_object.prototype.exps.tickcount
 ];};
