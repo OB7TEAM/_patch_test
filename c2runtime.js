@@ -25836,6 +25836,5 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Keyboard.prototype.cnds.OnKey,
 	cr.plugins_.WebStorage.prototype.acts.ClearLocal,
 	cr.plugins_.WebStorage.prototype.acts.ClearSession,
-	cr.system_object.prototype.acts.ResetPersisted,
-	cr.system_object.prototype.exps.tickcount
+	cr.system_object.prototype.acts.ResetPersisted
 ];};
