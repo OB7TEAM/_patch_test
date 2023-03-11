@@ -25674,6 +25674,7 @@ cr.behaviors.scrollto = function(runtime)
 	behaviorProto.acts = new Acts();
 }());
 cr.getObjectRefTable = function () { return [
+	cr.plugins_.Audio,
 	cr.plugins_.Browser,
 	cr.plugins_.Function,
 	cr.plugins_.Keyboard,
@@ -25683,7 +25684,6 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Spritefont2,
 	cr.plugins_.TiledBg,
 	cr.plugins_.Touch,
-	cr.plugins_.Audio,
 	cr.plugins_.video,
 	cr.plugins_.WebStorage,
 	cr.behaviors.bound,
