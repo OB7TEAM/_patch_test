@@ -14925,23 +14925,715 @@ cr.system_object.prototype.loadFromJSON = function (o)
 	};
 })();
 cr.shaders = {};
-cr.shaders["tint"] = {src: ["varying mediump vec2 vTex;",
-"uniform lowp sampler2D samplerFront;",
-"uniform lowp float red;",
-"uniform lowp float green;",
-"uniform lowp float blue;",
-"void main(void)",
-"{",
-"lowp vec4 front = texture2D(samplerFront, vTex);",
-"gl_FragColor = front * vec4(red, green, blue, 1.0);",
-"}"
-].join("\n"),
-	extendBoxHorizontal: 0,
-	extendBoxVertical: 0,
-	crossSampling: false,
-	preservesOpaqueness: true,
-	animated: false,
-	parameters: [["red", 0, 1], ["green", 0, 1], ["blue", 0, 1]] }
+;
+;
+cr.plugins_.Arr = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.Arr.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	var arrCache = [];
+	function allocArray()
+	{
+		if (arrCache.length)
+			return arrCache.pop();
+		else
+			return [];
+	};
+	if (!Array.isArray)
+	{
+		Array.isArray = function (vArg) {
+			return Object.prototype.toString.call(vArg) === "[object Array]";
+		};
+	}
+	function freeArray(a)
+	{
+		var i, len;
+		for (i = 0, len = a.length; i < len; i++)
+		{
+			if (Array.isArray(a[i]))
+				freeArray(a[i]);
+		}
+		cr.clearArray(a);
+		arrCache.push(a);
+	};
+	instanceProto.onCreate = function()
+	{
+		this.cx = this.properties[0];
+		this.cy = this.properties[1];
+		this.cz = this.properties[2];
+		if (!this.recycled)
+			this.arr = allocArray();
+		var a = this.arr;
+		a.length = this.cx;
+		var x, y, z;
+		for (x = 0; x < this.cx; x++)
+		{
+			if (!a[x])
+				a[x] = allocArray();
+			a[x].length = this.cy;
+			for (y = 0; y < this.cy; y++)
+			{
+				if (!a[x][y])
+					a[x][y] = allocArray();
+				a[x][y].length = this.cz;
+				for (z = 0; z < this.cz; z++)
+					a[x][y][z] = 0;
+			}
+		}
+		this.forX = [];
+		this.forY = [];
+		this.forZ = [];
+		this.forDepth = -1;
+	};
+	instanceProto.onDestroy = function ()
+	{
+		var x;
+		for (x = 0; x < this.cx; x++)
+			freeArray(this.arr[x]);		// will recurse down and recycle other arrays
+		cr.clearArray(this.arr);
+	};
+	instanceProto.at = function (x, y, z)
+	{
+		x = Math.floor(x);
+		y = Math.floor(y);
+		z = Math.floor(z);
+		if (isNaN(x) || x < 0 || x > this.cx - 1)
+			return 0;
+		if (isNaN(y) || y < 0 || y > this.cy - 1)
+			return 0;
+		if (isNaN(z) || z < 0 || z > this.cz - 1)
+			return 0;
+		return this.arr[x][y][z];
+	};
+	instanceProto.set = function (x, y, z, val)
+	{
+		x = Math.floor(x);
+		y = Math.floor(y);
+		z = Math.floor(z);
+		if (isNaN(x) || x < 0 || x > this.cx - 1)
+			return;
+		if (isNaN(y) || y < 0 || y > this.cy - 1)
+			return;
+		if (isNaN(z) || z < 0 || z > this.cz - 1)
+			return;
+		this.arr[x][y][z] = val;
+	};
+	instanceProto.getAsJSON = function ()
+	{
+		return JSON.stringify({
+			"c2array": true,
+			"size": [this.cx, this.cy, this.cz],
+			"data": this.arr
+		});
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		return {
+			"size": [this.cx, this.cy, this.cz],
+			"data": this.arr
+		};
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+		var sz = o["size"];
+		this.cx = sz[0];
+		this.cy = sz[1];
+		this.cz = sz[2];
+		this.arr = o["data"];
+	};
+	instanceProto.setSize = function (w, h, d)
+	{
+		if (w < 0) w = 0;
+		if (h < 0) h = 0;
+		if (d < 0) d = 0;
+		if (this.cx === w && this.cy === h && this.cz === d)
+			return;		// no change
+		this.cx = w;
+		this.cy = h;
+		this.cz = d;
+		var x, y, z;
+		var a = this.arr;
+		a.length = w;
+		for (x = 0; x < this.cx; x++)
+		{
+			if (cr.is_undefined(a[x]))
+				a[x] = allocArray();
+			a[x].length = h;
+			for (y = 0; y < this.cy; y++)
+			{
+				if (cr.is_undefined(a[x][y]))
+					a[x][y] = allocArray();
+				a[x][y].length = d;
+				for (z = 0; z < this.cz; z++)
+				{
+					if (cr.is_undefined(a[x][y][z]))
+						a[x][y][z] = 0;
+				}
+			}
+		}
+	};
+	instanceProto.getForX = function ()
+	{
+		if (this.forDepth >= 0 && this.forDepth < this.forX.length)
+			return this.forX[this.forDepth];
+		else
+			return 0;
+	};
+	instanceProto.getForY = function ()
+	{
+		if (this.forDepth >= 0 && this.forDepth < this.forY.length)
+			return this.forY[this.forDepth];
+		else
+			return 0;
+	};
+	instanceProto.getForZ = function ()
+	{
+		if (this.forDepth >= 0 && this.forDepth < this.forZ.length)
+			return this.forZ[this.forDepth];
+		else
+			return 0;
+	};
+	function Cnds() {};
+	Cnds.prototype.CompareX = function (x, cmp, val)
+	{
+		return cr.do_cmp(this.at(x, 0, 0), cmp, val);
+	};
+	Cnds.prototype.CompareXY = function (x, y, cmp, val)
+	{
+		return cr.do_cmp(this.at(x, y, 0), cmp, val);
+	};
+	Cnds.prototype.CompareXYZ = function (x, y, z, cmp, val)
+	{
+		return cr.do_cmp(this.at(x, y, z), cmp, val);
+	};
+	instanceProto.doForEachTrigger = function (current_event)
+	{
+		this.runtime.pushCopySol(current_event.solModifiers);
+		current_event.retrigger();
+		this.runtime.popSol(current_event.solModifiers);
+	};
+	Cnds.prototype.ArrForEach = function (dims)
+	{
+        var current_event = this.runtime.getCurrentEventStack().current_event;
+		this.forDepth++;
+		var forDepth = this.forDepth;
+		if (forDepth === this.forX.length)
+		{
+			this.forX.push(0);
+			this.forY.push(0);
+			this.forZ.push(0);
+		}
+		else
+		{
+			this.forX[forDepth] = 0;
+			this.forY[forDepth] = 0;
+			this.forZ[forDepth] = 0;
+		}
+		switch (dims) {
+		case 0:
+			for (this.forX[forDepth] = 0; this.forX[forDepth] < this.cx; this.forX[forDepth]++)
+			{
+				for (this.forY[forDepth] = 0; this.forY[forDepth] < this.cy; this.forY[forDepth]++)
+				{
+					for (this.forZ[forDepth] = 0; this.forZ[forDepth] < this.cz; this.forZ[forDepth]++)
+					{
+						this.doForEachTrigger(current_event);
+					}
+				}
+			}
+			break;
+		case 1:
+			for (this.forX[forDepth] = 0; this.forX[forDepth] < this.cx; this.forX[forDepth]++)
+			{
+				for (this.forY[forDepth] = 0; this.forY[forDepth] < this.cy; this.forY[forDepth]++)
+				{
+					this.doForEachTrigger(current_event);
+				}
+			}
+			break;
+		case 2:
+			for (this.forX[forDepth] = 0; this.forX[forDepth] < this.cx; this.forX[forDepth]++)
+			{
+				this.doForEachTrigger(current_event);
+			}
+			break;
+		}
+		this.forDepth--;
+		return false;
+	};
+	Cnds.prototype.CompareCurrent = function (cmp, val)
+	{
+		return cr.do_cmp(this.at(this.getForX(), this.getForY(), this.getForZ()), cmp, val);
+	};
+	Cnds.prototype.Contains = function(val)
+	{
+		var x, y, z;
+		for (x = 0; x < this.cx; x++)
+		{
+			for (y = 0; y < this.cy; y++)
+			{
+				for (z = 0; z < this.cz; z++)
+				{
+					if (this.arr[x][y][z] === val)
+						return true;
+				}
+			}
+		}
+		return false;
+	};
+	Cnds.prototype.IsEmpty = function ()
+	{
+		return this.cx === 0 || this.cy === 0 || this.cz === 0;
+	};
+	Cnds.prototype.CompareSize = function (axis, cmp, value)
+	{
+		var s = 0;
+		switch (axis) {
+		case 0:
+			s = this.cx;
+			break;
+		case 1:
+			s = this.cy;
+			break;
+		case 2:
+			s = this.cz;
+			break;
+		}
+		return cr.do_cmp(s, cmp, value);
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.Clear = function ()
+	{
+		var x, y, z;
+		for (x = 0; x < this.cx; x++)
+			for (y = 0; y < this.cy; y++)
+				for (z = 0; z < this.cz; z++)
+					this.arr[x][y][z] = 0;
+	};
+	Acts.prototype.SetSize = function (w, h, d)
+	{
+		this.setSize(w, h, d);
+	};
+	Acts.prototype.SetX = function (x, val)
+	{
+		this.set(x, 0, 0, val);
+	};
+	Acts.prototype.SetXY = function (x, y, val)
+	{
+		this.set(x, y, 0, val);
+	};
+	Acts.prototype.SetXYZ = function (x, y, z, val)
+	{
+		this.set(x, y, z, val);
+	};
+	Acts.prototype.Push = function (where, value, axis)
+	{
+		var x = 0, y = 0, z = 0;
+		var a = this.arr;
+		switch (axis) {
+		case 0:	// X axis
+			if (where === 0)	// back
+			{
+				x = a.length;
+				a.push(allocArray());
+			}
+			else				// front
+			{
+				x = 0;
+				a.unshift(allocArray());
+			}
+			a[x].length = this.cy;
+			for ( ; y < this.cy; y++)
+			{
+				a[x][y] = allocArray();
+				a[x][y].length = this.cz;
+				for (z = 0; z < this.cz; z++)
+					a[x][y][z] = value;
+			}
+			this.cx++;
+			break;
+		case 1: // Y axis
+			for ( ; x < this.cx; x++)
+			{
+				if (where === 0)	// back
+				{
+					y = a[x].length;
+					a[x].push(allocArray());
+				}
+				else				// front
+				{
+					y = 0;
+					a[x].unshift(allocArray());
+				}
+				a[x][y].length = this.cz;
+				for (z = 0; z < this.cz; z++)
+					a[x][y][z] = value;
+			}
+			this.cy++;
+			break;
+		case 2:	// Z axis
+			for ( ; x < this.cx; x++)
+			{
+				for (y = 0; y < this.cy; y++)
+				{
+					if (where === 0)	// back
+					{
+						a[x][y].push(value);
+					}
+					else				// front
+					{
+						a[x][y].unshift(value);
+					}
+				}
+			}
+			this.cz++;
+			break;
+		}
+	};
+	Acts.prototype.Pop = function (where, axis)
+	{
+		var x = 0, y = 0, z = 0;
+		var a = this.arr;
+		switch (axis) {
+		case 0:	// X axis
+			if (this.cx === 0)
+				break;
+			if (where === 0)	// back
+			{
+				freeArray(a.pop());
+			}
+			else				// front
+			{
+				freeArray(a.shift());
+			}
+			this.cx--;
+			break;
+		case 1: // Y axis
+			if (this.cy === 0)
+				break;
+			for ( ; x < this.cx; x++)
+			{
+				if (where === 0)	// back
+				{
+					freeArray(a[x].pop());
+				}
+				else				// front
+				{
+					freeArray(a[x].shift());
+				}
+			}
+			this.cy--;
+			break;
+		case 2:	// Z axis
+			if (this.cz === 0)
+				break;
+			for ( ; x < this.cx; x++)
+			{
+				for (y = 0; y < this.cy; y++)
+				{
+					if (where === 0)	// back
+					{
+						a[x][y].pop();
+					}
+					else				// front
+					{
+						a[x][y].shift();
+					}
+				}
+			}
+			this.cz--;
+			break;
+		}
+	};
+	Acts.prototype.Reverse = function (axis)
+	{
+		var x = 0, y = 0, z = 0;
+		var a = this.arr;
+		if (this.cx === 0 || this.cy === 0 || this.cz === 0)
+			return;		// no point reversing empty array
+		switch (axis) {
+		case 0:	// X axis
+			a.reverse();
+			break;
+		case 1: // Y axis
+			for ( ; x < this.cx; x++)
+				a[x].reverse();
+			break;
+		case 2:	// Z axis
+			for ( ; x < this.cx; x++)
+				for (y = 0; y < this.cy; y++)
+					a[x][y].reverse();
+			this.cz--;
+			break;
+		}
+	};
+	function compareValues(va, vb)
+	{
+		if (cr.is_number(va) && cr.is_number(vb))
+			return va - vb;
+		else
+		{
+			var sa = "" + va;
+			var sb = "" + vb;
+			if (sa < sb)
+				return -1;
+			else if (sa > sb)
+				return 1;
+			else
+				return 0;
+		}
+	}
+	Acts.prototype.Sort = function (axis)
+	{
+		var x = 0, y = 0, z = 0;
+		var a = this.arr;
+		if (this.cx === 0 || this.cy === 0 || this.cz === 0)
+			return;		// no point sorting empty array
+		switch (axis) {
+		case 0:	// X axis
+			a.sort(function (a, b) {
+				return compareValues(a[0][0], b[0][0]);
+			});
+			break;
+		case 1: // Y axis
+			for ( ; x < this.cx; x++)
+			{
+				a[x].sort(function (a, b) {
+					return compareValues(a[0], b[0]);
+				});
+			}
+			break;
+		case 2:	// Z axis
+			for ( ; x < this.cx; x++)
+			{
+				for (y = 0; y < this.cy; y++)
+				{
+					a[x][y].sort(compareValues);
+				}
+			}
+			break;
+		}
+	};
+	Acts.prototype.Delete = function (index, axis)
+	{
+		var x = 0, y = 0, z = 0;
+		index = Math.floor(index);
+		var a = this.arr;
+		if (index < 0)
+			return;
+		switch (axis) {
+		case 0:	// X axis
+			if (index >= this.cx)
+				break;
+			freeArray(a[index]);
+			a.splice(index, 1);
+			this.cx--;
+			break;
+		case 1: // Y axis
+			if (index >= this.cy)
+				break;
+			for ( ; x < this.cx; x++)
+			{
+				freeArray(a[x][index]);
+				a[x].splice(index, 1);
+			}
+			this.cy--;
+			break;
+		case 2:	// Z axis
+			if (index >= this.cz)
+				break;
+			for ( ; x < this.cx; x++)
+			{
+				for (y = 0; y < this.cy; y++)
+				{
+					a[x][y].splice(index, 1);
+				}
+			}
+			this.cz--;
+			break;
+		}
+	};
+	Acts.prototype.Insert = function (value, index, axis)
+	{
+		var x = 0, y = 0, z = 0;
+		index = Math.floor(index);
+		var a = this.arr;
+		if (index < 0)
+			return;
+		switch (axis) {
+		case 0:	// X axis
+			if (index > this.cx)
+				return;
+			x = index;
+			a.splice(x, 0, allocArray());
+			a[x].length = this.cy;
+			for ( ; y < this.cy; y++)
+			{
+				a[x][y] = allocArray();
+				a[x][y].length = this.cz;
+				for (z = 0; z < this.cz; z++)
+					a[x][y][z] = value;
+			}
+			this.cx++;
+			break;
+		case 1: // Y axis
+			if (index > this.cy)
+				return;
+			for ( ; x < this.cx; x++)
+			{
+				y = index;
+				a[x].splice(y, 0, allocArray());
+				a[x][y].length = this.cz;
+				for (z = 0; z < this.cz; z++)
+					a[x][y][z] = value;
+			}
+			this.cy++;
+			break;
+		case 2:	// Z axis
+			if (index > this.cz)
+				return;
+			for ( ; x < this.cx; x++)
+			{
+				for (y = 0; y < this.cy; y++)
+				{
+					a[x][y].splice(index, 0, value);
+				}
+			}
+			this.cz++;
+			break;
+		}
+	};
+	Acts.prototype.JSONLoad = function (json_)
+	{
+		var o;
+		try {
+			o = JSON.parse(json_);
+		}
+		catch(e) { return; }
+		if (!o["c2array"])		// presumably not a c2array object
+			return;
+		var sz = o["size"];
+		this.cx = sz[0];
+		this.cy = sz[1];
+		this.cz = sz[2];
+		this.arr = o["data"];
+	};
+	Acts.prototype.JSONDownload = function (filename)
+	{
+		var a = document.createElement("a");
+		if (typeof a.download === "undefined")
+		{
+			var str = 'data:text/html,' + encodeURIComponent("<p><a download='" + filename + "' href=\"data:application/json,"
+				+ encodeURIComponent(this.getAsJSON())
+				+ "\">Download link</a></p>");
+			window.open(str);
+		}
+		else
+		{
+			var body = document.getElementsByTagName("body")[0];
+			a.textContent = filename;
+			a.href = "data:application/json," + encodeURIComponent(this.getAsJSON());
+			a.download = filename;
+			body.appendChild(a);
+			var clickEvent = document.createEvent("MouseEvent");
+			clickEvent.initMouseEvent("click", true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+			a.dispatchEvent(clickEvent);
+			body.removeChild(a);
+		}
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.At = function (ret, x, y_, z_)
+	{
+		var y = y_ || 0;
+		var z = z_ || 0;
+		ret.set_any(this.at(x, y, z));
+	};
+	Exps.prototype.Width = function (ret)
+	{
+		ret.set_int(this.cx);
+	};
+	Exps.prototype.Height = function (ret)
+	{
+		ret.set_int(this.cy);
+	};
+	Exps.prototype.Depth = function (ret)
+	{
+		ret.set_int(this.cz);
+	};
+	Exps.prototype.CurX = function (ret)
+	{
+		ret.set_int(this.getForX());
+	};
+	Exps.prototype.CurY = function (ret)
+	{
+		ret.set_int(this.getForY());
+	};
+	Exps.prototype.CurZ = function (ret)
+	{
+		ret.set_int(this.getForZ());
+	};
+	Exps.prototype.CurValue = function (ret)
+	{
+		ret.set_any(this.at(this.getForX(), this.getForY(), this.getForZ()));
+	};
+	Exps.prototype.Front = function (ret)
+	{
+		ret.set_any(this.at(0, 0, 0));
+	};
+	Exps.prototype.Back = function (ret)
+	{
+		ret.set_any(this.at(this.cx - 1, 0, 0));
+	};
+	Exps.prototype.IndexOf = function (ret, v)
+	{
+		for (var i = 0; i < this.cx; i++)
+		{
+			if (this.arr[i][0][0] === v)
+			{
+				ret.set_int(i);
+				return;
+			}
+		}
+		ret.set_int(-1);
+	};
+	Exps.prototype.LastIndexOf = function (ret, v)
+	{
+		for (var i = this.cx - 1; i >= 0; i--)
+		{
+			if (this.arr[i][0][0] === v)
+			{
+				ret.set_int(i);
+				return;
+			}
+		}
+		ret.set_int(-1);
+	};
+	Exps.prototype.AsJSON = function (ret)
+	{
+		ret.set_string(this.getAsJSON());
+	};
+	pluginProto.exps = new Exps();
+}());
 ;
 ;
 cr.plugins_.Audio = function(runtime)
@@ -18783,6 +19475,285 @@ cr.plugins_.Browser = function(runtime)
 }());
 ;
 ;
+cr.plugins_.Button = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.Button.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	instanceProto.onCreate = function()
+	{
+		if (this.runtime.isDomFree)
+		{
+			cr.logexport("[Construct 2] Button plugin not supported on this platform - the object will not be created");
+			return;
+		}
+		this.isCheckbox = (this.properties[0] === 1);
+		this.inputElem = document.createElement("input");
+		if (this.isCheckbox)
+			this.elem = document.createElement("label");
+		else
+			this.elem = this.inputElem;
+		this.labelText = null;
+		this.inputElem.type = (this.isCheckbox ? "checkbox" : "button");
+		this.inputElem.id = this.properties[6];
+		jQuery(this.elem).appendTo(this.runtime.canvasdiv ? this.runtime.canvasdiv : "body");
+		if (this.isCheckbox)
+		{
+			jQuery(this.inputElem).appendTo(this.elem);
+			this.labelText = document.createTextNode(this.properties[1]);
+			jQuery(this.elem).append(this.labelText);
+			this.inputElem.checked = (this.properties[7] !== 0);
+			jQuery(this.elem).css("font-family", "sans-serif");
+			jQuery(this.elem).css("display", "inline-block");
+			jQuery(this.elem).css("color", "black");
+		}
+		else
+			this.inputElem.value = this.properties[1];
+		this.elem.title = this.properties[2];
+		this.inputElem.disabled = (this.properties[4] === 0);
+		this.autoFontSize = (this.properties[5] !== 0);
+		this.element_hidden = false;
+		if (this.properties[3] === 0)
+		{
+			jQuery(this.elem).hide();
+			this.visible = false;
+			this.element_hidden = true;
+		}
+		this.inputElem.onclick = (function (self) {
+			return function(e) {
+				e.stopPropagation();
+				self.runtime.isInUserInputEvent = true;
+				self.runtime.trigger(cr.plugins_.Button.prototype.cnds.OnClicked, self);
+				self.runtime.isInUserInputEvent = false;
+			};
+		})(this);
+		this.elem.addEventListener("touchstart", function (e) {
+			e.stopPropagation();
+		}, false);
+		this.elem.addEventListener("touchmove", function (e) {
+			e.stopPropagation();
+		}, false);
+		this.elem.addEventListener("touchend", function (e) {
+			e.stopPropagation();
+		}, false);
+		jQuery(this.elem).mousedown(function (e) {
+			e.stopPropagation();
+		});
+		jQuery(this.elem).mouseup(function (e) {
+			e.stopPropagation();
+		});
+		jQuery(this.elem).keydown(function (e) {
+			e.stopPropagation();
+		});
+		jQuery(this.elem).keyup(function (e) {
+			e.stopPropagation();
+		});
+		this.lastLeft = 0;
+		this.lastTop = 0;
+		this.lastRight = 0;
+		this.lastBottom = 0;
+		this.lastWinWidth = 0;
+		this.lastWinHeight = 0;
+		this.updatePosition(true);
+		this.runtime.tickMe(this);
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		var o = {
+			"tooltip": this.elem.title,
+			"disabled": !!this.inputElem.disabled
+		};
+		if (this.isCheckbox)
+		{
+			o["checked"] = !!this.inputElem.checked;
+			o["text"] = this.labelText.nodeValue;
+		}
+		else
+		{
+			o["text"] = this.elem.value;
+		}
+		return o;
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+		this.elem.title = o["tooltip"];
+		this.inputElem.disabled = o["disabled"];
+		if (this.isCheckbox)
+		{
+			this.inputElem.checked = o["checked"];
+			this.labelText.nodeValue = o["text"];
+		}
+		else
+		{
+			this.elem.value = o["text"];
+		}
+	};
+	instanceProto.onDestroy = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		jQuery(this.elem).remove();
+		this.elem = null;
+	};
+	instanceProto.tick = function ()
+	{
+		this.updatePosition();
+	};
+	var last_canvas_offset = null;
+	var last_checked_tick = -1;
+	instanceProto.updatePosition = function (first)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		var left = this.layer.layerToCanvas(this.x, this.y, true);
+		var top = this.layer.layerToCanvas(this.x, this.y, false);
+		var right = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, true);
+		var bottom = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, false);
+		var rightEdge = this.runtime.width / this.runtime.devicePixelRatio;
+		var bottomEdge = this.runtime.height / this.runtime.devicePixelRatio;
+		if (!this.visible || !this.layer.visible || right <= 0 || bottom <= 0 || left >= rightEdge || top >= bottomEdge)
+		{
+			if (!this.element_hidden)
+				jQuery(this.elem).hide();
+			this.element_hidden = true;
+			return;
+		}
+		if (left < 1)
+			left = 1;
+		if (top < 1)
+			top = 1;
+		if (right >= rightEdge)
+			right = rightEdge - 1;
+		if (bottom >= bottomEdge)
+			bottom = bottomEdge - 1;
+		var curWinWidth = window.innerWidth;
+		var curWinHeight = window.innerHeight;
+		if (!first && this.lastLeft === left && this.lastTop === top && this.lastRight === right && this.lastBottom === bottom && this.lastWinWidth === curWinWidth && this.lastWinHeight === curWinHeight)
+		{
+			if (this.element_hidden)
+			{
+				jQuery(this.elem).show();
+				this.element_hidden = false;
+			}
+			return;
+		}
+		this.lastLeft = left;
+		this.lastTop = top;
+		this.lastRight = right;
+		this.lastBottom = bottom;
+		this.lastWinWidth = curWinWidth;
+		this.lastWinHeight = curWinHeight;
+		if (this.element_hidden)
+		{
+			jQuery(this.elem).show();
+			this.element_hidden = false;
+		}
+		var offx = Math.round(left) + jQuery(this.runtime.canvas).offset().left;
+		var offy = Math.round(top) + jQuery(this.runtime.canvas).offset().top;
+		jQuery(this.elem).css("position", "absolute");
+		jQuery(this.elem).offset({left: offx, top: offy});
+		jQuery(this.elem).width(Math.round(right - left));
+		jQuery(this.elem).height(Math.round(bottom - top));
+		if (this.autoFontSize)
+			jQuery(this.elem).css("font-size", ((this.layer.getScale(true) / this.runtime.devicePixelRatio) - 0.2) + "em");
+	};
+	instanceProto.draw = function(ctx)
+	{
+	};
+	instanceProto.drawGL = function(glw)
+	{
+	};
+	function Cnds() {};
+	Cnds.prototype.OnClicked = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsChecked = function ()
+	{
+		return this.isCheckbox && this.inputElem.checked;
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.SetText = function (text)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		if (this.isCheckbox)
+			this.labelText.nodeValue = text;
+		else
+			this.elem.value = text;
+	};
+	Acts.prototype.SetTooltip = function (text)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.title = text;
+	};
+	Acts.prototype.SetVisible = function (vis)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.visible = (vis !== 0);
+	};
+	Acts.prototype.SetEnabled = function (en)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.inputElem.disabled = (en === 0);
+	};
+	Acts.prototype.SetFocus = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.inputElem.focus();
+	};
+	Acts.prototype.SetBlur = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.inputElem.blur();
+	};
+	Acts.prototype.SetCSSStyle = function (p, v)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		jQuery(this.elem).css(p, v);
+	};
+	Acts.prototype.SetChecked = function (c)
+	{
+		if (this.runtime.isDomFree || !this.isCheckbox)
+			return;
+		this.inputElem.checked = (c === 1);
+	};
+	Acts.prototype.ToggleChecked = function ()
+	{
+		if (this.runtime.isDomFree || !this.isCheckbox)
+			return;
+		this.inputElem.checked = !this.inputElem.checked;
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	pluginProto.exps = new Exps();
+}());
+;
+;
 cr.plugins_.Function = function(runtime)
 {
 	this.runtime = runtime;
@@ -19210,6 +20181,1199 @@ cr.plugins_.Keyboard = function(runtime)
 	Exps.prototype.StringFromKeyCode = function (ret, kc)
 	{
 		ret.set_string(fixedStringFromCharCode(kc));
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
+cr.plugins_.List = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.List.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	instanceProto.onCreate = function()
+	{
+		if (this.runtime.isDomFree)
+		{
+			cr.logexport("[Construct 2] List plugin not supported on this platform - the object will not be created");
+			return;
+		}
+		this.elem = document.createElement("select");
+		this.elem.id = this.properties[7];
+		jQuery(this.elem).appendTo(this.runtime.canvasdiv ? this.runtime.canvasdiv : "body");
+		this.elem.title = this.properties[1];
+		this.elem.disabled = (this.properties[3] === 0);
+		if (this.properties[4] === 0)
+			this.elem.size = 2;
+		this.elem["multiple"] = (this.properties[5] !== 0);
+		this.autoFontSize = (this.properties[6] !== 0);
+		if (this.properties[2] === 0)
+		{
+			jQuery(this.elem).hide();
+			this.visible = false;
+		}
+		if (this.properties[0])
+		{
+			var itemsArr = this.properties[0].split(";");
+			var i, len, o;
+			for (i = 0, len = itemsArr.length; i < len; i++)
+			{
+				o = document.createElement("option");
+				o.text = itemsArr[i];
+				this.elem.add(o);
+			}
+		}
+		var self = this;
+		this.elem.onchange = function() {
+				self.runtime.trigger(cr.plugins_.List.prototype.cnds.OnSelectionChanged, self);
+			};
+		this.elem.onclick = function(e) {
+				e.stopPropagation();
+				self.runtime.isInUserInputEvent = true;
+				self.runtime.trigger(cr.plugins_.List.prototype.cnds.OnClicked, self);
+				self.runtime.isInUserInputEvent = false;
+			};
+		this.elem.ondblclick = function(e) {
+				e.stopPropagation();
+				self.runtime.isInUserInputEvent = true;
+				self.runtime.trigger(cr.plugins_.List.prototype.cnds.OnDoubleClicked, self);
+				self.runtime.isInUserInputEvent = false;
+			};
+		this.elem.addEventListener("touchstart", function (e) {
+			e.stopPropagation();
+		}, false);
+		this.elem.addEventListener("touchmove", function (e) {
+			e.stopPropagation();
+		}, false);
+		this.elem.addEventListener("touchend", function (e) {
+			e.stopPropagation();
+		}, false);
+		jQuery(this.elem).mousedown(function (e) {
+			e.stopPropagation();
+		});
+		jQuery(this.elem).mouseup(function (e) {
+			e.stopPropagation();
+		});
+		this.lastLeft = 0;
+		this.lastTop = 0;
+		this.lastRight = 0;
+		this.lastBottom = 0;
+		this.lastWinWidth = 0;
+		this.lastWinHeight = 0;
+		this.isVisible = true;
+		this.updatePosition(true);
+		this.runtime.tickMe(this);
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		var o = {
+			"tooltip": this.elem.title,
+			"disabled": !!this.elem.disabled,
+			"items": [],
+			"sel": []
+		};
+		var i, len;
+		var itemsarr = o["items"];
+		for (i = 0, len = this.elem.length; i < len; i++)
+		{
+			itemsarr.push(this.elem.options[i].text);
+		}
+		var selarr = o["sel"];
+		if (this.elem["multiple"])
+		{
+			for (i = 0, len = this.elem.length; i < len; i++)
+			{
+				if (this.elem.options[i].selected)
+					selarr.push(i);
+			}
+		}
+		else
+		{
+			selarr.push(this.elem["selectedIndex"]);
+		}
+		return o;
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+		this.elem.title = o["tooltip"];
+		this.elem.disabled = o["disabled"];
+		var itemsarr = o["items"];
+		while (this.elem.length)
+			this.elem.remove(this.elem.length - 1);
+		var i, len, opt;
+		for (i = 0, len = itemsarr.length; i < len; i++)
+		{
+			opt = document.createElement("option");
+			opt.text = itemsarr[i];
+			this.elem.add(opt);
+		}
+		var selarr = o["sel"];
+		if (this.elem["multiple"])
+		{
+			for (i = 0, len = selarr.length; i < len; i++)
+			{
+				if (selarr[i] < this.elem.length)
+					this.elem.options[selarr[i]].selected = true;
+			}
+		}
+		else if (selarr.length >= 1)
+		{
+			this.elem["selectedIndex"] = selarr[0];
+		}
+	};
+	instanceProto.onDestroy = function ()
+	{
+		if (this.runtime.isDomFree)
+				return;
+		jQuery(this.elem).remove();
+		this.elem = null;
+	};
+	instanceProto.tick = function ()
+	{
+		this.updatePosition();
+	};
+	instanceProto.updatePosition = function (first)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		var left = this.layer.layerToCanvas(this.x, this.y, true);
+		var top = this.layer.layerToCanvas(this.x, this.y, false);
+		var right = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, true);
+		var bottom = this.layer.layerToCanvas(this.x + this.width, this.y + this.height, false);
+		var rightEdge = this.runtime.width / this.runtime.devicePixelRatio;
+		var bottomEdge = this.runtime.height / this.runtime.devicePixelRatio;
+		if (!this.visible || !this.layer.visible || right <= 0 || bottom <= 0 || left >= rightEdge || top >= bottomEdge)
+		{
+			if (this.isVisible)
+				jQuery(this.elem).hide();
+			this.isVisible = false;
+			return;
+		}
+		if (left < 1)
+			left = 1;
+		if (top < 1)
+			top = 1;
+		if (right >= rightEdge)
+			right = rightEdge - 1;
+		if (bottom >= bottomEdge)
+			bottom = bottomEdge - 1;
+		var curWinWidth = window.innerWidth;
+		var curWinHeight = window.innerHeight;
+		if (!first && this.lastLeft === left && this.lastTop === top && this.lastRight === right && this.lastBottom === bottom && this.lastWinWidth === curWinWidth && this.lastWinHeight === curWinHeight)
+		{
+			if (!this.isVisible)
+			{
+				jQuery(this.elem).show();
+				this.isVisible = true;
+			}
+			return;
+		}
+		this.lastLeft = left;
+		this.lastTop = top;
+		this.lastRight = right;
+		this.lastBottom = bottom;
+		this.lastWinWidth = curWinWidth;
+		this.lastWinHeight = curWinHeight;
+		if (!this.isVisible)
+		{
+			jQuery(this.elem).show();
+			this.isVisible = true;
+		}
+		var offx = Math.round(left) + jQuery(this.runtime.canvas).offset().left;
+		var offy = Math.round(top) + jQuery(this.runtime.canvas).offset().top;
+		jQuery(this.elem).css("position", "absolute");
+		jQuery(this.elem).offset({left: offx, top: offy});
+		jQuery(this.elem).width(Math.round(right - left));
+		jQuery(this.elem).height(Math.round(bottom - top));
+		if (this.autoFontSize)
+			jQuery(this.elem).css("font-size", ((this.layer.getScale(true) / this.runtime.devicePixelRatio) - 0.2) + "em");
+	};
+	instanceProto.draw = function(ctx)
+	{
+	};
+	instanceProto.drawGL = function(glw)
+	{
+	};
+	function Cnds() {};
+	Cnds.prototype.CompareSelection = function (cmp_, x_)
+	{
+		return cr.do_cmp(this.elem["selectedIndex"], cmp_, x_);
+	};
+	Cnds.prototype.OnSelectionChanged = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnClicked = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnDoubleClicked = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.CompareSelectedText = function (x_, case_)
+	{
+		var selected_text = "";
+		var i = this.elem["selectedIndex"];
+		if (i < 0 || i >= this.elem.length)
+			return false;
+		selected_text = this.elem.options[i].text;
+		if (case_)
+			return selected_text == x_;
+		else
+			return cr.equals_nocase(selected_text, x_);
+	};
+	Cnds.prototype.CompareTextAt = function (i_, x_, case_)
+	{
+		var text = "";
+		var i = Math.floor(i_);
+		if (i < 0 || i >= this.elem.length)
+			return false;
+		text = this.elem.options[i].text;
+		if (case_)
+			return text == x_;
+		else
+			return cr.equals_nocase(text,x_);
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.Select = function (i)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem["selectedIndex"] = i;
+	};
+	Acts.prototype.SetTooltip = function (text)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.title = text;
+	};
+	Acts.prototype.SetVisible = function (vis)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.visible = (vis !== 0);
+	};
+	Acts.prototype.SetEnabled = function (en)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.disabled = (en === 0);
+	};
+	Acts.prototype.SetFocus = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.focus();
+	};
+	Acts.prototype.SetBlur = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.blur();
+	};
+	Acts.prototype.SetCSSStyle = function (p, v)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		jQuery(this.elem).css(p, v);
+	};
+	Acts.prototype.AddItem = function (text_)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		var o = document.createElement("option");
+		o.text = text_;
+		this.elem.add(o);
+	};
+	Acts.prototype.AddItemAt = function (index_, text_)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		index_ = Math.floor(index_);
+		if (index_ < 0)
+			index_ = 0;
+		var o = document.createElement("option");
+		o.text = text_;
+		if (index_ >= this.elem.length)
+			this.elem.add(o);
+		else
+		{
+			this.elem.add(o, this.elem.options[index_]);
+		}
+	};
+	Acts.prototype.Remove = function (index_)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		index_ = Math.floor(index_);
+		this.elem.remove(index_);
+	};
+	Acts.prototype.SetItemText = function (index_, text_)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		index_ = Math.floor(index_);
+		if (index_ < 0 || index_ >= this.elem.length)
+			return;
+		this.elem.options[index_].text = text_;
+	};
+	Acts.prototype.Clear = function ()
+	{
+		if (this.runtime.isDomFree)
+			return;
+		this.elem.innerHTML = "";
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.ItemCount = function (ret)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_int(0);
+			return;
+		}
+		ret.set_int(this.elem.length);
+	};
+	Exps.prototype.ItemTextAt = function (ret, i)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_string("");
+			return;
+		}
+		i = Math.floor(i);
+		if (i < 0 || i >= this.elem.length)
+		{
+			ret.set_string("");
+			return;
+		}
+		ret.set_string(this.elem.options[i].text);
+	};
+	Exps.prototype.SelectedIndex = function (ret)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_int(0);
+			return;
+		}
+		ret.set_int(this.elem["selectedIndex"]);
+	};
+	Exps.prototype.SelectedText = function (ret)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_string("");
+			return;
+		}
+		var i = this.elem["selectedIndex"];
+		if (i < 0 || i >= this.elem.length)
+		{
+			ret.set_string("");
+			return;
+		}
+		ret.set_string(this.elem.options[i].text);
+	};
+	Exps.prototype.SelectedCount = function (ret)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_int(0);
+			return;
+		}
+		var i, len, count = 0;
+		for (i = 0, len = this.elem.length; i < len; i++)
+		{
+			if (this.elem.options[i].selected)
+				count++;
+		}
+		ret.set_int(count);
+	};
+	Exps.prototype.SelectedIndexAt = function (ret, index_)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_int(0);
+			return;
+		}
+		index_ = Math.floor(index_);
+		var i, len, count = 0, result = 0;
+		for (i = 0, len = this.elem.length; i < len; i++)
+		{
+			if (this.elem.options[i].selected)
+			{
+				if (count === index_)
+				{
+					result = i;
+					break;
+				}
+				count++;
+			}
+		}
+		ret.set_int(result);
+	};
+	Exps.prototype.SelectedTextAt = function (ret, index_)
+	{
+		if (this.runtime.isDomFree)
+		{
+			ret.set_string("");
+			return;
+		}
+		index_ = Math.floor(index_);
+		var i, len, count = 0, result = "";
+		for (i = 0, len = this.elem.length; i < len; i++)
+		{
+			if (this.elem.options[i].selected)
+			{
+				if (count === index_)
+				{
+					result = this.elem.options[i].text;
+					break;
+				}
+				count++;
+			}
+		}
+		ret.set_string(result);
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
+cr.plugins_.Mouse = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.Mouse.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+		this.buttonMap = new Array(4);		// mouse down states
+		this.mouseXcanvas = 0;				// mouse position relative to canvas
+		this.mouseYcanvas = 0;
+		this.triggerButton = 0;
+		this.triggerType = 0;
+		this.triggerDir = 0;
+		this.handled = false;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	instanceProto.onCreate = function()
+	{
+		var self = this;
+		if (!this.runtime.isDomFree)
+		{
+			jQuery(document).mousemove(
+				function(info) {
+					self.onMouseMove(info);
+				}
+			);
+			jQuery(document).mousedown(
+				function(info) {
+					self.onMouseDown(info);
+				}
+			);
+			jQuery(document).mouseup(
+				function(info) {
+					self.onMouseUp(info);
+				}
+			);
+			jQuery(document).dblclick(
+				function(info) {
+					self.onDoubleClick(info);
+				}
+			);
+			var wheelevent = function(info) {
+								self.onWheel(info);
+							};
+			document.addEventListener("mousewheel", wheelevent, false);
+			document.addEventListener("DOMMouseScroll", wheelevent, false);
+		}
+	};
+	var dummyoffset = {left: 0, top: 0};
+	instanceProto.onMouseMove = function(info)
+	{
+		var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
+		this.mouseXcanvas = info.pageX - offset.left;
+		this.mouseYcanvas = info.pageY - offset.top;
+	};
+	instanceProto.mouseInGame = function ()
+	{
+		if (this.runtime.fullscreen_mode > 0)
+			return true;
+		return this.mouseXcanvas >= 0 && this.mouseYcanvas >= 0
+		    && this.mouseXcanvas < this.runtime.width && this.mouseYcanvas < this.runtime.height;
+	};
+	instanceProto.onMouseDown = function(info)
+	{
+		if (!this.mouseInGame())
+			return;
+		this.buttonMap[info.which] = true;
+		this.runtime.isInUserInputEvent = true;
+		this.runtime.trigger(cr.plugins_.Mouse.prototype.cnds.OnAnyClick, this);
+		this.triggerButton = info.which - 1;	// 1-based
+		this.triggerType = 0;					// single click
+		this.runtime.trigger(cr.plugins_.Mouse.prototype.cnds.OnClick, this);
+		this.runtime.trigger(cr.plugins_.Mouse.prototype.cnds.OnObjectClicked, this);
+		this.runtime.isInUserInputEvent = false;
+	};
+	instanceProto.onMouseUp = function(info)
+	{
+		if (!this.buttonMap[info.which])
+			return;
+		if (this.runtime.had_a_click && !this.runtime.isMobile)
+			info.preventDefault();
+		this.runtime.had_a_click = true;
+		this.buttonMap[info.which] = false;
+		this.runtime.isInUserInputEvent = true;
+		this.triggerButton = info.which - 1;	// 1-based
+		this.runtime.trigger(cr.plugins_.Mouse.prototype.cnds.OnRelease, this);
+		this.runtime.isInUserInputEvent = false;
+	};
+	instanceProto.onDoubleClick = function(info)
+	{
+		if (!this.mouseInGame())
+			return;
+		info.preventDefault();
+		this.runtime.isInUserInputEvent = true;
+		this.triggerButton = info.which - 1;	// 1-based
+		this.triggerType = 1;					// double click
+		this.runtime.trigger(cr.plugins_.Mouse.prototype.cnds.OnClick, this);
+		this.runtime.trigger(cr.plugins_.Mouse.prototype.cnds.OnObjectClicked, this);
+		this.runtime.isInUserInputEvent = false;
+	};
+	instanceProto.onWheel = function (info)
+	{
+		var delta = info.wheelDelta ? info.wheelDelta : info.detail ? -info.detail : 0;
+		this.triggerDir = (delta < 0 ? 0 : 1);
+		this.handled = false;
+		this.runtime.isInUserInputEvent = true;
+		this.runtime.trigger(cr.plugins_.Mouse.prototype.cnds.OnWheel, this);
+		this.runtime.isInUserInputEvent = false;
+		if (this.handled && cr.isCanvasInputEvent(info))
+			info.preventDefault();
+	};
+	function Cnds() {};
+	Cnds.prototype.OnClick = function (button, type)
+	{
+		return button === this.triggerButton && type === this.triggerType;
+	};
+	Cnds.prototype.OnAnyClick = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsButtonDown = function (button)
+	{
+		return this.buttonMap[button + 1];	// jQuery uses 1-based buttons for some reason
+	};
+	Cnds.prototype.OnRelease = function (button)
+	{
+		return button === this.triggerButton;
+	};
+	Cnds.prototype.IsOverObject = function (obj)
+	{
+		var cnd = this.runtime.getCurrentCondition();
+		var mx = this.mouseXcanvas;
+		var my = this.mouseYcanvas;
+		return cr.xor(this.runtime.testAndSelectCanvasPointOverlap(obj, mx, my, cnd.inverted), cnd.inverted);
+	};
+	Cnds.prototype.OnObjectClicked = function (button, type, obj)
+	{
+		if (button !== this.triggerButton || type !== this.triggerType)
+			return false;	// wrong click type
+		return this.runtime.testAndSelectCanvasPointOverlap(obj, this.mouseXcanvas, this.mouseYcanvas, false);
+	};
+	Cnds.prototype.OnWheel = function (dir)
+	{
+		this.handled = true;
+		return dir === this.triggerDir;
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	var lastSetCursor = null;
+	Acts.prototype.SetCursor = function (c)
+	{
+		if (this.runtime.isDomFree)
+			return;
+		var cursor_style = ["auto", "pointer", "text", "crosshair", "move", "help", "wait", "none"][c];
+		if (lastSetCursor === cursor_style)
+			return;		// redundant
+		lastSetCursor = cursor_style;
+		document.body.style.cursor = cursor_style;
+	};
+	Acts.prototype.SetCursorSprite = function (obj)
+	{
+		if (this.runtime.isDomFree || this.runtime.isMobile || !obj)
+			return;
+		var inst = obj.getFirstPicked();
+		if (!inst || !inst.curFrame)
+			return;
+		var frame = inst.curFrame;
+		if (lastSetCursor === frame)
+			return;		// already set this frame
+		lastSetCursor = frame;
+		var datauri = frame.getDataUri();
+		var cursor_style = "url(" + datauri + ") " + Math.round(frame.hotspotX * frame.width) + " " + Math.round(frame.hotspotY * frame.height) + ", auto";
+		document.body.style.cursor = "";
+		document.body.style.cursor = cursor_style;
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.X = function (ret, layerparam)
+	{
+		var layer, oldScale, oldZoomRate, oldParallaxX, oldAngle;
+		if (cr.is_undefined(layerparam))
+		{
+			layer = this.runtime.getLayerByNumber(0);
+			oldScale = layer.scale;
+			oldZoomRate = layer.zoomRate;
+			oldParallaxX = layer.parallaxX;
+			oldAngle = layer.angle;
+			layer.scale = 1;
+			layer.zoomRate = 1.0;
+			layer.parallaxX = 1.0;
+			layer.angle = 0;
+			ret.set_float(layer.canvasToLayer(this.mouseXcanvas, this.mouseYcanvas, true));
+			layer.scale = oldScale;
+			layer.zoomRate = oldZoomRate;
+			layer.parallaxX = oldParallaxX;
+			layer.angle = oldAngle;
+		}
+		else
+		{
+			if (cr.is_number(layerparam))
+				layer = this.runtime.getLayerByNumber(layerparam);
+			else
+				layer = this.runtime.getLayerByName(layerparam);
+			if (layer)
+				ret.set_float(layer.canvasToLayer(this.mouseXcanvas, this.mouseYcanvas, true));
+			else
+				ret.set_float(0);
+		}
+	};
+	Exps.prototype.Y = function (ret, layerparam)
+	{
+		var layer, oldScale, oldZoomRate, oldParallaxY, oldAngle;
+		if (cr.is_undefined(layerparam))
+		{
+			layer = this.runtime.getLayerByNumber(0);
+			oldScale = layer.scale;
+			oldZoomRate = layer.zoomRate;
+			oldParallaxY = layer.parallaxY;
+			oldAngle = layer.angle;
+			layer.scale = 1;
+			layer.zoomRate = 1.0;
+			layer.parallaxY = 1.0;
+			layer.angle = 0;
+			ret.set_float(layer.canvasToLayer(this.mouseXcanvas, this.mouseYcanvas, false));
+			layer.scale = oldScale;
+			layer.zoomRate = oldZoomRate;
+			layer.parallaxY = oldParallaxY;
+			layer.angle = oldAngle;
+		}
+		else
+		{
+			if (cr.is_number(layerparam))
+				layer = this.runtime.getLayerByNumber(layerparam);
+			else
+				layer = this.runtime.getLayerByName(layerparam);
+			if (layer)
+				ret.set_float(layer.canvasToLayer(this.mouseXcanvas, this.mouseYcanvas, false));
+			else
+				ret.set_float(0);
+		}
+	};
+	Exps.prototype.AbsoluteX = function (ret)
+	{
+		ret.set_float(this.mouseXcanvas);
+	};
+	Exps.prototype.AbsoluteY = function (ret)
+	{
+		ret.set_float(this.mouseYcanvas);
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
+cr.plugins_.NodeWebkit = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var isNWjs = false;
+	var path = null;
+	var fs = null;
+	var gui = null;
+	var child_process = null;
+	var process = null;
+	var nw_appfolder = "";
+	var nw_userfolder = "";
+	var slash = "\\";
+	var filelist = [];
+	var droppedfile = "";
+	var chosenpath = "";
+	var pluginProto = cr.plugins_.NodeWebkit.prototype;
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	instanceProto.onCreate = function()
+	{
+		isNWjs = this.runtime.isNWjs;
+		var self = this;
+		if (isNWjs)
+		{
+			path = require("path");
+			fs = require("fs");
+			child_process = require("child_process");
+			process = window["process"] || nw["process"];
+			if (process["platform"] !== "win32")
+				slash = "/";
+			nw_appfolder = path["dirname"](process["execPath"]) + slash;
+			nw_userfolder = (process["env"]["HOME"] || process["env"]["HOMEPATH"] || process["env"]["USERPROFILE"]) + slash;
+			gui = window["nwgui"];
+			window["ondrop"] = function (e)
+			{
+				e.preventDefault();
+				for (var i = 0; i < e["dataTransfer"]["files"].length; ++i)
+				{
+					droppedfile = e["dataTransfer"]["files"][i]["path"];
+					self.runtime.trigger(cr.plugins_.NodeWebkit.prototype.cnds.OnFileDrop, self);
+				}
+				return false;
+			};
+			jQuery("#c2nwOpenFileDialog").change(function (e) {
+				chosenpath = jQuery(this).val();
+				self.runtime.trigger(cr.plugins_.NodeWebkit.prototype.cnds.OnOpenDlg, self);
+				try {
+					document.getElementById("c2nwOpenFileDialog").value = null;
+				}
+				catch (e) {}
+			});
+			jQuery("#c2nwChooseFolderDialog").change(function (e) {
+				chosenpath = jQuery(this).val();
+				self.runtime.trigger(cr.plugins_.NodeWebkit.prototype.cnds.OnFolderDlg, self);
+				try {
+					document.getElementById("c2nwChooseFolderDialog").value = null;
+				}
+				catch (e) {}
+			});
+			jQuery("#c2nwSaveDialog").change(function (e) {
+				chosenpath = jQuery(this).val();
+				self.runtime.trigger(cr.plugins_.NodeWebkit.prototype.cnds.OnSaveDlg, self);
+				try {
+					document.getElementById("c2nwSaveDialog").value = null;
+				}
+				catch (e) {}
+			});
+		}
+	};
+	instanceProto.onDestroy = function ()
+	{
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		return {
+		};
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+	};
+	function Cnds() {};
+	Cnds.prototype.PathExists = function (path_)
+	{
+		if (isNWjs)
+			return fs["existsSync"](path_);
+		else
+			return false;
+	};
+	Cnds.prototype.OnFileDrop = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnOpenDlg = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnFolderDlg = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnSaveDlg = function ()
+	{
+		return true;
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.WriteFile = function (path_, contents_)
+	{
+		if (!isNWjs)
+			return;
+		try {
+			fs["writeFileSync"](path_, contents_, {"encoding": "utf8"});
+		}
+		catch (e)
+		{}
+	};
+	Acts.prototype.RenameFile = function (old_, new_)
+	{
+		if (!isNWjs)
+			return;
+		try {
+			fs["renameSync"](old_, new_);
+		}
+		catch (e)
+		{}
+	};
+	Acts.prototype.DeleteFile = function (path_)
+	{
+		if (!isNWjs)
+			return;
+		try {
+			fs["unlinkSync"](path_);
+		}
+		catch (e)
+		{}
+	};
+	Acts.prototype.CopyFile = function (path_, dest_)
+	{
+		if (!isNWjs || path_ === dest_)
+			return;
+		try {
+			var contents = fs["readFileSync"](path_, {"flags": "rb"});
+			fs["writeFileSync"](dest_, contents, {"flags": "wb"});
+		}
+		catch (e)
+		{}
+	};
+	Acts.prototype.MoveFile = function (path_, dest_)
+	{
+		if (!isNWjs || path_ === dest_)
+			return;
+		try {
+			var contents = fs["readFileSync"](path_, {"flags": "rb"});
+			fs["writeFileSync"](dest_, contents, {"flags": "wb"});
+			if (fs["existsSync"](dest_))
+				fs["unlinkSync"](path_);
+		}
+		catch (e)
+		{}
+	};
+	Acts.prototype.RunFile = function (path_)
+	{
+		if (!isNWjs)
+			return;
+		child_process["exec"](path_, function() {});
+	};
+	Acts.prototype.OpenBrowser = function (url_)
+	{
+		if (!isNWjs)
+			return;
+		var opener;
+		switch (process.platform) {
+		case "win32":
+			opener = 'start ""';
+			break;
+		case "darwin":
+			opener = 'open';
+			break;
+		default:
+			opener = path["join"](__dirname, "../vendor/xdg-open");
+			break;
+		}
+		child_process["exec"](opener + ' "' + url_.replace(/"/, '\\\"') + '"');
+	};
+	Acts.prototype.CreateFolder = function (path_)
+	{
+		if (!isNWjs)
+			return;
+		try {
+			fs["mkdirSync"](path_);
+		}
+		catch (e)
+		{}
+	};
+	Acts.prototype.AppendFile = function (path_, contents_)
+	{
+		if (!isNWjs)
+			return;
+		try {
+			fs["appendFileSync"](path_, contents_, {"encoding": "utf8"});
+		}
+		catch (e)
+		{}
+	};
+	Acts.prototype.ListFiles = function (path_)
+	{
+		if (!isNWjs)
+			return;
+		try {
+			filelist = fs["readdirSync"](path_);
+		}
+		catch (e)
+		{}
+		if (!filelist)
+			filelist = [];
+	};
+	Acts.prototype.ShowOpenDlg = function (accept_)
+	{
+		if (!isNWjs)
+			return;
+		var dlg = jQuery("#c2nwOpenFileDialog");
+		dlg.attr("accept", accept_);
+		dlg.trigger("click");
+	};
+	Acts.prototype.ShowFolderDlg = function (accept_)
+	{
+		if (!isNWjs)
+			return;
+		jQuery("#c2nwChooseFolderDialog").trigger("click");
+	};
+	Acts.prototype.ShowSaveDlg = function (accept_)
+	{
+		if (!isNWjs)
+			return;
+		var dlg = jQuery("#c2nwSaveDialog");
+		dlg.attr("accept", accept_);
+		dlg.trigger("click");
+	};
+	Acts.prototype.SetWindowX = function (x_)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["x"] = x_;
+	};
+	Acts.prototype.SetWindowY = function (y_)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["y"] = y_;
+	};
+	Acts.prototype.SetWindowWidth = function (w_)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["width"] = w_;
+	};
+	Acts.prototype.SetWindowHeight = function (h_)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["height"] = h_;
+	};
+	Acts.prototype.SetWindowTitle = function (str)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["title"] = str;
+	};
+	Acts.prototype.WindowMinimize = function ()
+	{
+		if (!isNWjs || !gui)
+			return;
+		var win = gui["Window"]["get"]();
+		setTimeout(function () {
+			win["minimize"]();
+		}, 100);
+	};
+	Acts.prototype.WindowMaximize = function ()
+	{
+		if (!isNWjs || !gui)
+			return;
+		var win = gui["Window"]["get"]();
+		setTimeout(function () {
+			win["maximize"]();
+		}, 100);
+	};
+	Acts.prototype.WindowUnmaximize = function ()
+	{
+		if (!isNWjs || !gui)
+			return;
+		var win = gui["Window"]["get"]();
+		setTimeout(function () {
+			win["unmaximize"]();
+		}, 100);
+	};
+	Acts.prototype.WindowRestore = function ()
+	{
+		if (!isNWjs || !gui)
+			return;
+		var win = gui["Window"]["get"]();
+		setTimeout(function () {
+			win["restore"]();
+		}, 100);
+	};
+	Acts.prototype.WindowRequestAttention = function (request_)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["requestAttention"](request_ ? 3 : 0);
+	};
+	Acts.prototype.WindowSetMaxSize = function (w, h)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["setMaximumSize"](w, h);
+	};
+	Acts.prototype.WindowSetMinSize = function (w, h)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["setMinimumSize"](w, h);
+	};
+	Acts.prototype.WindowSetResizable = function (x)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["setResizable"](x !== 0);
+	};
+	Acts.prototype.WindowSetAlwaysOnTop = function (x)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["setAlwaysOnTop"](x !== 0);
+	};
+	Acts.prototype.ShowDevTools = function ()
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Window"]["get"]()["showDevTools"]();
+	};
+	Acts.prototype.SetClipboardText = function (str)
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Clipboard"]["get"]()["set"](str);
+	};
+	Acts.prototype.ClearClipboard = function ()
+	{
+		if (!isNWjs || !gui)
+			return;
+		gui["Clipboard"]["get"]()["clear"]();
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.AppFolder = function (ret)
+	{
+		ret.set_string(nw_appfolder);
+	};
+	Exps.prototype.UserFolder = function (ret)
+	{
+		ret.set_string(nw_userfolder);
+	};
+	Exps.prototype.ReadFile = function (ret, path_)
+	{
+		if (!isNWjs)
+		{
+			ret.set_string("");
+			return;
+		}
+		var contents = "";
+		try {
+			contents = fs["readFileSync"](path_, {"encoding": "utf8"});
+		}
+		catch (e) {}
+		ret.set_string(contents);
+	};
+	Exps.prototype.FileSize = function (ret, path_)
+	{
+		if (!isNWjs)
+		{
+			ret.set_int(0);
+			return;
+		}
+		var size = 0;
+		try {
+			var stat = fs["statSync"](path_);
+			if (stat)
+				size = stat["size"] || 0;
+		}
+		catch (e) {}
+		ret.set_int(size);
+	};
+	Exps.prototype.ListCount = function (ret)
+	{
+		ret.set_int(filelist.length);
+	};
+	Exps.prototype.ListAt = function (ret, index)
+	{
+		index = Math.floor(index);
+		if (index < 0 || index >= filelist.length)
+			ret.set_string("");
+		else
+			ret.set_string(filelist[index]);
+	};
+	Exps.prototype.DroppedFile = function (ret)
+	{
+		ret.set_string(droppedfile);
+	};
+	Exps.prototype.ChosenPath = function (ret)
+	{
+		ret.set_string(chosenpath);
+	};
+	Exps.prototype.WindowX = function (ret)
+	{
+		ret.set_int((isNWjs && gui) ? gui["Window"]["get"]()["x"] : 0);
+	};
+	Exps.prototype.WindowY = function (ret)
+	{
+		ret.set_int((isNWjs && gui) ? gui["Window"]["get"]()["y"] : 0);
+	};
+	Exps.prototype.WindowWidth = function (ret)
+	{
+		ret.set_int((isNWjs && gui) ? gui["Window"]["get"]()["width"] : 0);
+	};
+	Exps.prototype.WindowHeight = function (ret)
+	{
+		ret.set_int((isNWjs && gui) ? gui["Window"]["get"]()["height"] : 0);
+	};
+	Exps.prototype.WindowTitle = function (ret)
+	{
+		ret.set_string((isNWjs && gui) ? (gui["Window"]["get"]()["title"] || "") : 0);
+	};
+	Exps.prototype.ClipboardText = function (ret)
+	{
+		ret.set_string((isNWjs && gui) ? (gui["Clipboard"]["get"]()["get"]() || "") : 0);
 	};
 	pluginProto.exps = new Exps();
 }());
@@ -19793,314 +21957,6 @@ cr.plugins_.Particles = function(runtime)
 		ret.set_float(this.timeout);
 	};
 	pluginProto.exps = new Exps();
-}());
-;
-;
-cr.plugins_.Rex_Function = function(runtime)
-{
-	this.runtime = runtime;
-};
-(function ()
-{
-	var pluginProto = cr.plugins_.Rex_Function.prototype;
-	pluginProto.Type = function(plugin)
-	{
-		this.plugin = plugin;
-		this.runtime = plugin.runtime;
-	};
-	var typeProto = pluginProto.Type.prototype;
-	typeProto.onCreate = function()
-	{
-	};
-	pluginProto.Instance = function(type)
-	{
-		this.type = type;
-		this.runtime = type.runtime;
-	};
-	var instanceProto = pluginProto.Instance.prototype;
-	instanceProto.onCreate = function()
-	{
-        this.fnObj = new cr.plugins_.Rex_Function.FunctionKlass(this, this.properties[0]);
-        this.adapter = new cr.plugins_.Rex_Function.FunctionAdapterKlass(this);
-        this.check_name = "FUNCTION";
-	};
-	instanceProto.CallFn = function(name, args)
-	{
-        if ((typeof(args) == "object") || (typeof(args) == "undefined"))
-        {
-            this.fnObj["_CallFn"](name, args);
-        }
-        else
-        {
-            this.fnObj["_ExeCmd"](arguments);
-        }
-        return this.fnObj["result"];
-	};
-	instanceProto.ExecuteCommands = function (command_string)
-	{
-        if (command_string == "")
-            return;
-        var cmds = CSVToArray(command_string);
-        var cmd_cnt = cmds.length;
-        var i;
-        var cmd, j, arg_len, mcmd;
-        for(i=0; i<cmd_cnt; i++)
-        {
-           cmd = cmds[i];
-           arg_len = cmd.length;
-           for(j=1; j<arg_len; j++)
-           {
-               mcmd = cmd[j];
-               cmd[j] = (mcmd != "")?
-                        eval("("+mcmd+")"):
-                        null;
-           }
-           this._ExeCmd(cmd);
-        }
-        return this.fnObj["result"];
-	};
-	instanceProto.InjectJS = function(name, fn)
-	{
-        this.fnObj["InjectJS"](name, fn);
-	};
-	instanceProto.AddParams = function(param)
-	{
-        if (param)
-            this.fnObj["param"] = this.hash_copy(param, this.fnObj["param"]);
-	};
-	instanceProto.GetReturns = function()
-	{
-        return this.fnObj["ret"];
-	};
-	instanceProto._ExeCmd = function(_args)
-	{
-        var args = (typeof _args === "string")? arguments:_args;
-        return this.fnObj["_ExeCmd"](args);
-	};
-    instanceProto.hash_copy = function (obj_in, obj_src)
-    {
-        var obj_out = (obj_src == null)? {}:obj_src;
-        var key;
-        for (key in obj_in)
-            obj_out[key] = obj_in[key];
-        return obj_out;
-    };
-    var CSVToArray = function ( strData, strDelimiter ){
-        strDelimiter = (strDelimiter || ",");
-        var objPattern = new RegExp(
-                (
-                        "(\\" + strDelimiter + "|\\r?\\n|\\r|^)" +
-                        "(?:\"([^\"]*(?:\"\"[^\"]*)*)\"|" +
-                        "([^\"\\" + strDelimiter + "\\r\\n]*))"
-                ),
-                "gi"
-                );
-        var arrData = [[]];
-        var arrMatches = null;
-        while (arrMatches = objPattern.exec( strData )){
-                var strMatchedDelimiter = arrMatches[ 1 ];
-                if (
-                        strMatchedDelimiter.length &&
-                        (strMatchedDelimiter != strDelimiter)
-                        ){
-                        arrData.push( [] );
-                }
-                if (arrMatches[ 2 ]){
-                        var strMatchedValue = arrMatches[ 2 ].replace(
-                                new RegExp( "\"\"", "g" ),
-                                "\""
-                                );
-                } else {
-                        var strMatchedValue = arrMatches[ 3 ];
-                }
-                arrData[ arrData.length - 1 ].push( strMatchedValue );
-        }
-        return( arrData );
-    };
-    var clean_hashtable = function (hash_table)
-	{
-        var key;
-        for (key in hash_table)
-            delete hash_table[key];
-	};
-	pluginProto.cnds = {};
-	var cnds = pluginProto.cnds;
-	cnds.OnFunctionCalled = function (name)
-	{
-        var is_my_call = (this.fnObj["fn_name"] == name);
-        this.fnObj["is_echo"] |= is_my_call;
-		return is_my_call;
-	};
-	pluginProto.acts = {};
-	var acts = pluginProto.acts;
-	acts.CallFunction = function (name)
-	{
-        this.CallFn(name);
-	};
-	acts.CleanParameters = function ()
-	{
-        clean_hashtable(this.fnObj["param"]);
-	};
-	acts.SetParameter = function (index, value)
-	{
-        this.fnObj["param"][index] = value;
-	};
-	acts.CleanRetruns = function ()
-	{
-        clean_hashtable(this.fnObj["ret"]);
-	};
-	acts.SetReturn = function (index, value)
-	{
-        this.fnObj["ret"][index] = value;
-	};
-	acts.CreateJSFunctionObject = function (name, code_string)
-	{
-        var fn = eval("("+code_string+")");
-        this.InjectJS(name, fn);
-	};
-	acts.SetResult = function (value)
-	{
-        this.fnObj["result"] = value;
-	};
-	acts.ExecuteCommands = function (command_string)
-	{
-        this.ExecuteCommands(command_string);
-	};
-	acts.InjectJSFunctionObjects = function (code_string)
-	{
-        var fn = eval("("+code_string+")");
-        var fns = fn(this.fnObj);
-	};
-	pluginProto.exps = {};
-	var exps = pluginProto.exps;
-    exps.Param = function (ret, index)
-	{
-        var value = this.fnObj["param"][index];
-        if (value == null)
-        {
-            value = 0;
-            if (this.fnObj["is_debug_mode"])
-            {
-                alert ("Can not find parameter '" + index + "'");
-            }
-        }
-	    ret.set_any(value);
-	};
-    exps.Ret = function (ret, index)
-	{
-        var value = this.fnObj["ret"][index];
-        if (value == null)
-        {
-            value = 0;
-            if (this.fnObj["is_debug_mode"])
-            {
-                alert ("Can not find return value '" + index + "'");
-            }
-        }
-	    ret.set_any(value);
-	};
-    exps.Eval = function (ret, code_string)
-	{
-	    ret.set_any( eval( "("+code_string+")" ) );
-	};
-    exps.Result = function (ret)
-	{
-	    ret.set_any( this.fnObj["result"] );
-	};
-    exps.Call = function (ret)
-	{
-        var args = Array.prototype.slice.call(arguments,1);
-	    ret.set_any( this._ExeCmd(args) );
-	};
-}());
-(function ()
-{
-    cr.plugins_.Rex_Function.FunctionKlass = function(plugin, is_debug_mode)
-    {
-        this["plugin"] = plugin;
-        this["is_debug_mode"] = is_debug_mode;
-        this["fn_name"] = "";
-        this["_fn_name_stack"] = [];
-        this["param"] = {};
-        this["ret"] = {};
-        this["result"] = 0;
-        this["is_echo"] = false;
-		this["JSFns"] = {};
-    };
-    var FunctionKlassProto = cr.plugins_.Rex_Function.FunctionKlass.prototype;
-	FunctionKlassProto["CallFn"] = function()   // (name, param0, param1...)
-	{
-        return this["_ExeCmd"](arguments);
-	};
-	FunctionKlassProto["InjectJS"] = function(name, fn)
-	{
-        if (this["is_debug_mode"] && this["JSFns"][name] != null)
-            alert ("JS function '" + name + "' has existed.");
-        this["JSFns"][name] = fn;
-	};
-	FunctionKlassProto["_ExeCmd"] = function(args)
-	{
-        var arg_len = args.length;
-        var i, arg;
-        for (i=1; i<arg_len; i++)
-        {
-            arg = args[i];
-            if (arg != null)
-                this["param"][i-1] = arg;
-        }
-        this["_CallFn"](args[0] || "");
-        return this["result"];
-	};
-	FunctionKlassProto["_CallFn"] = function(name, args)
-	{
-        if (args)
-            this["param"] = this["plugin"].hash_copy(args, this["param"]);
-        this["is_echo"] = false;
-        var is_break = this["_CallJS"](name);
-        if (!is_break)
-        {
-            this["_CallC2Event"](name);
-        }
-        if ((!this["is_echo"]) && this["is_debug_mode"])
-        {
-            alert ("Can not find function '" + name + "'");
-        }
-	};
-	FunctionKlassProto["_CallC2Event"] = function(name)
-	{
-	    this["_fn_name_stack"].push(this["fn_name"]);
-        this["fn_name"] = name;
-	    this["plugin"].runtime.trigger(cr.plugins_.Rex_Function.prototype.cnds.OnFunctionCalled, this["plugin"]);
-	    this["fn_name"] = this["_fn_name_stack"].pop();
-	};
- 	FunctionKlassProto["_CallJS"] = function(name)
-	{
-        var is_break = false;
-	    var fn_obj = this["JSFns"][name];
-        if (fn_obj != null)
-        {
-            this["is_echo"] = true;
-            is_break = fn_obj(this);
-        }
-        return is_break;
-	};
-    cr.plugins_.Rex_Function.FunctionAdapterKlass = function(plugin)
-    {
-        this["_plugin"] = plugin;
-    };
-    var FunctionAdapterKlassProto = cr.plugins_.Rex_Function.FunctionAdapterKlass.prototype;
-	FunctionAdapterKlassProto["CallFn"] = function(name, args)
-	{
-	    return this["_plugin"].CallFn(name, args);
-	};
-	FunctionAdapterKlassProto["GetReturns"] = function()
-	{
-	    return this["_plugin"].GetReturns();
-	};
-	FunctionAdapterKlassProto["InjectJS"] = function(name, fn)
-	{
-	    this["_plugin"].InjectJS(name, fn);
-	};
 }());
 ;
 ;
@@ -22127,6 +23983,638 @@ cr.plugins_.Spritefont2 = function(runtime)
 }());
 ;
 ;
+cr.plugins_.Text = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var pluginProto = cr.plugins_.Text.prototype;
+	pluginProto.onCreate = function ()
+	{
+		pluginProto.acts.SetWidth = function (w)
+		{
+			if (this.width !== w)
+			{
+				this.width = w;
+				this.text_changed = true;	// also recalculate text wrapping
+				this.set_bbox_changed();
+			}
+		};
+	};
+	pluginProto.Type = function(plugin)
+	{
+		this.plugin = plugin;
+		this.runtime = plugin.runtime;
+	};
+	var typeProto = pluginProto.Type.prototype;
+	typeProto.onCreate = function()
+	{
+	};
+	typeProto.onLostWebGLContext = function ()
+	{
+		if (this.is_family)
+			return;
+		var i, len, inst;
+		for (i = 0, len = this.instances.length; i < len; i++)
+		{
+			inst = this.instances[i];
+			inst.mycanvas = null;
+			inst.myctx = null;
+			inst.mytex = null;
+		}
+	};
+	pluginProto.Instance = function(type)
+	{
+		this.type = type;
+		this.runtime = type.runtime;
+		if (this.recycled)
+			cr.clearArray(this.lines);
+		else
+			this.lines = [];		// for word wrapping
+		this.text_changed = true;
+	};
+	var instanceProto = pluginProto.Instance.prototype;
+	var requestedWebFonts = {};		// already requested web fonts have an entry here
+	instanceProto.onCreate = function()
+	{
+		this.text = this.properties[0];
+		this.visible = (this.properties[1] === 0);		// 0=visible, 1=invisible
+		this.font = this.properties[2];
+		this.color = this.properties[3];
+		this.halign = this.properties[4];				// 0=left, 1=center, 2=right
+		this.valign = this.properties[5];				// 0=top, 1=center, 2=bottom
+		this.wrapbyword = (this.properties[7] === 0);	// 0=word, 1=character
+		this.lastwidth = this.width;
+		this.lastwrapwidth = this.width;
+		this.lastheight = this.height;
+		this.line_height_offset = this.properties[8];
+		this.facename = "";
+		this.fontstyle = "";
+		this.ptSize = 0;
+		this.textWidth = 0;
+		this.textHeight = 0;
+		this.parseFont();
+		this.mycanvas = null;
+		this.myctx = null;
+		this.mytex = null;
+		this.need_text_redraw = false;
+		this.last_render_tick = this.runtime.tickcount;
+		if (this.recycled)
+			this.rcTex.set(0, 0, 1, 1);
+		else
+			this.rcTex = new cr.rect(0, 0, 1, 1);
+		if (this.runtime.glwrap)
+			this.runtime.tickMe(this);
+;
+	};
+	instanceProto.parseFont = function ()
+	{
+		var arr = this.font.split(" ");
+		var i;
+		for (i = 0; i < arr.length; i++)
+		{
+			if (arr[i].substr(arr[i].length - 2, 2) === "pt")
+			{
+				this.ptSize = parseInt(arr[i].substr(0, arr[i].length - 2));
+				this.pxHeight = Math.ceil((this.ptSize / 72.0) * 96.0) + 4;	// assume 96dpi...
+				if (i > 0)
+					this.fontstyle = arr[i - 1];
+				this.facename = arr[i + 1];
+				for (i = i + 2; i < arr.length; i++)
+					this.facename += " " + arr[i];
+				break;
+			}
+		}
+	};
+	instanceProto.saveToJSON = function ()
+	{
+		return {
+			"t": this.text,
+			"f": this.font,
+			"c": this.color,
+			"ha": this.halign,
+			"va": this.valign,
+			"wr": this.wrapbyword,
+			"lho": this.line_height_offset,
+			"fn": this.facename,
+			"fs": this.fontstyle,
+			"ps": this.ptSize,
+			"pxh": this.pxHeight,
+			"tw": this.textWidth,
+			"th": this.textHeight,
+			"lrt": this.last_render_tick
+		};
+	};
+	instanceProto.loadFromJSON = function (o)
+	{
+		this.text = o["t"];
+		this.font = o["f"];
+		this.color = o["c"];
+		this.halign = o["ha"];
+		this.valign = o["va"];
+		this.wrapbyword = o["wr"];
+		this.line_height_offset = o["lho"];
+		this.facename = o["fn"];
+		this.fontstyle = o["fs"];
+		this.ptSize = o["ps"];
+		this.pxHeight = o["pxh"];
+		this.textWidth = o["tw"];
+		this.textHeight = o["th"];
+		this.last_render_tick = o["lrt"];
+		this.text_changed = true;
+		this.lastwidth = this.width;
+		this.lastwrapwidth = this.width;
+		this.lastheight = this.height;
+	};
+	instanceProto.tick = function ()
+	{
+		if (this.runtime.glwrap && this.mytex && (this.runtime.tickcount - this.last_render_tick >= 300))
+		{
+			var layer = this.layer;
+            this.update_bbox();
+            var bbox = this.bbox;
+            if (bbox.right < layer.viewLeft || bbox.bottom < layer.viewTop || bbox.left > layer.viewRight || bbox.top > layer.viewBottom)
+			{
+				this.runtime.glwrap.deleteTexture(this.mytex);
+				this.mytex = null;
+				this.myctx = null;
+				this.mycanvas = null;
+			}
+		}
+	};
+	instanceProto.onDestroy = function ()
+	{
+		this.myctx = null;
+		this.mycanvas = null;
+		if (this.runtime.glwrap && this.mytex)
+			this.runtime.glwrap.deleteTexture(this.mytex);
+		this.mytex = null;
+	};
+	instanceProto.updateFont = function ()
+	{
+		this.font = this.fontstyle + " " + this.ptSize.toString() + "pt " + this.facename;
+		this.text_changed = true;
+		this.runtime.redraw = true;
+	};
+	instanceProto.draw = function(ctx, glmode)
+	{
+		ctx.font = this.font;
+		ctx.textBaseline = "top";
+		ctx.fillStyle = this.color;
+		ctx.globalAlpha = glmode ? 1 : this.opacity;
+		var myscale = 1;
+		if (glmode)
+		{
+			myscale = this.layer.getScale();
+			ctx.save();
+			ctx.scale(myscale, myscale);
+		}
+		if (this.text_changed || this.width !== this.lastwrapwidth)
+		{
+			this.type.plugin.WordWrap(this.text, this.lines, ctx, this.width, this.wrapbyword);
+			this.text_changed = false;
+			this.lastwrapwidth = this.width;
+		}
+		this.update_bbox();
+		var penX = glmode ? 0 : this.bquad.tlx;
+		var penY = glmode ? 0 : this.bquad.tly;
+		if (this.runtime.pixel_rounding)
+		{
+			penX = (penX + 0.5) | 0;
+			penY = (penY + 0.5) | 0;
+		}
+		if (this.angle !== 0 && !glmode)
+		{
+			ctx.save();
+			ctx.translate(penX, penY);
+			ctx.rotate(this.angle);
+			penX = 0;
+			penY = 0;
+		}
+		var endY = penY + this.height;
+		var line_height = this.pxHeight;
+		line_height += this.line_height_offset;
+		var drawX;
+		var i;
+		if (this.valign === 1)		// center
+			penY += Math.max(this.height / 2 - (this.lines.length * line_height) / 2, 0);
+		else if (this.valign === 2)	// bottom
+			penY += Math.max(this.height - (this.lines.length * line_height) - 2, 0);
+		for (i = 0; i < this.lines.length; i++)
+		{
+			drawX = penX;
+			if (this.halign === 1)		// center
+				drawX = penX + (this.width - this.lines[i].width) / 2;
+			else if (this.halign === 2)	// right
+				drawX = penX + (this.width - this.lines[i].width);
+			ctx.fillText(this.lines[i].text, drawX, penY);
+			penY += line_height;
+			if (penY >= endY - line_height)
+				break;
+		}
+		if (this.angle !== 0 || glmode)
+			ctx.restore();
+		this.last_render_tick = this.runtime.tickcount;
+	};
+	instanceProto.drawGL = function(glw)
+	{
+		if (this.width < 1 || this.height < 1)
+			return;
+		var need_redraw = this.text_changed || this.need_text_redraw;
+		this.need_text_redraw = false;
+		var layer_scale = this.layer.getScale();
+		var layer_angle = this.layer.getAngle();
+		var rcTex = this.rcTex;
+		var floatscaledwidth = layer_scale * this.width;
+		var floatscaledheight = layer_scale * this.height;
+		var scaledwidth = Math.ceil(floatscaledwidth);
+		var scaledheight = Math.ceil(floatscaledheight);
+		var halfw = this.runtime.draw_width / 2;
+		var halfh = this.runtime.draw_height / 2;
+		if (!this.myctx)
+		{
+			this.mycanvas = document.createElement("canvas");
+			this.mycanvas.width = scaledwidth;
+			this.mycanvas.height = scaledheight;
+			this.lastwidth = scaledwidth;
+			this.lastheight = scaledheight;
+			need_redraw = true;
+			this.myctx = this.mycanvas.getContext("2d");
+		}
+		if (scaledwidth !== this.lastwidth || scaledheight !== this.lastheight)
+		{
+			this.mycanvas.width = scaledwidth;
+			this.mycanvas.height = scaledheight;
+			if (this.mytex)
+			{
+				glw.deleteTexture(this.mytex);
+				this.mytex = null;
+			}
+			need_redraw = true;
+		}
+		if (need_redraw)
+		{
+			this.myctx.clearRect(0, 0, scaledwidth, scaledheight);
+			this.draw(this.myctx, true);
+			if (!this.mytex)
+				this.mytex = glw.createEmptyTexture(scaledwidth, scaledheight, this.runtime.linearSampling, this.runtime.isMobile);
+			glw.videoToTexture(this.mycanvas, this.mytex, this.runtime.isMobile);
+		}
+		this.lastwidth = scaledwidth;
+		this.lastheight = scaledheight;
+		glw.setTexture(this.mytex);
+		glw.setOpacity(this.opacity);
+		glw.resetModelView();
+		glw.translate(-halfw, -halfh);
+		glw.updateModelView();
+		var q = this.bquad;
+		var tlx = this.layer.layerToCanvas(q.tlx, q.tly, true, true);
+		var tly = this.layer.layerToCanvas(q.tlx, q.tly, false, true);
+		var trx = this.layer.layerToCanvas(q.trx, q.try_, true, true);
+		var try_ = this.layer.layerToCanvas(q.trx, q.try_, false, true);
+		var brx = this.layer.layerToCanvas(q.brx, q.bry, true, true);
+		var bry = this.layer.layerToCanvas(q.brx, q.bry, false, true);
+		var blx = this.layer.layerToCanvas(q.blx, q.bly, true, true);
+		var bly = this.layer.layerToCanvas(q.blx, q.bly, false, true);
+		if (this.runtime.pixel_rounding || (this.angle === 0 && layer_angle === 0))
+		{
+			var ox = ((tlx + 0.5) | 0) - tlx;
+			var oy = ((tly + 0.5) | 0) - tly
+			tlx += ox;
+			tly += oy;
+			trx += ox;
+			try_ += oy;
+			brx += ox;
+			bry += oy;
+			blx += ox;
+			bly += oy;
+		}
+		if (this.angle === 0 && layer_angle === 0)
+		{
+			trx = tlx + scaledwidth;
+			try_ = tly;
+			brx = trx;
+			bry = tly + scaledheight;
+			blx = tlx;
+			bly = bry;
+			rcTex.right = 1;
+			rcTex.bottom = 1;
+		}
+		else
+		{
+			rcTex.right = floatscaledwidth / scaledwidth;
+			rcTex.bottom = floatscaledheight / scaledheight;
+		}
+		glw.quadTex(tlx, tly, trx, try_, brx, bry, blx, bly, rcTex);
+		glw.resetModelView();
+		glw.scale(layer_scale, layer_scale);
+		glw.rotateZ(-this.layer.getAngle());
+		glw.translate((this.layer.viewLeft + this.layer.viewRight) / -2, (this.layer.viewTop + this.layer.viewBottom) / -2);
+		glw.updateModelView();
+		this.last_render_tick = this.runtime.tickcount;
+	};
+	var wordsCache = [];
+	pluginProto.TokeniseWords = function (text)
+	{
+		cr.clearArray(wordsCache);
+		var cur_word = "";
+		var ch;
+		var i = 0;
+		while (i < text.length)
+		{
+			ch = text.charAt(i);
+			if (ch === "\n")
+			{
+				if (cur_word.length)
+				{
+					wordsCache.push(cur_word);
+					cur_word = "";
+				}
+				wordsCache.push("\n");
+				++i;
+			}
+			else if (ch === " " || ch === "\t" || ch === "-")
+			{
+				do {
+					cur_word += text.charAt(i);
+					i++;
+				}
+				while (i < text.length && (text.charAt(i) === " " || text.charAt(i) === "\t"));
+				wordsCache.push(cur_word);
+				cur_word = "";
+			}
+			else if (i < text.length)
+			{
+				cur_word += ch;
+				i++;
+			}
+		}
+		if (cur_word.length)
+			wordsCache.push(cur_word);
+	};
+	var linesCache = [];
+	function allocLine()
+	{
+		if (linesCache.length)
+			return linesCache.pop();
+		else
+			return {};
+	};
+	function freeLine(l)
+	{
+		linesCache.push(l);
+	};
+	function freeAllLines(arr)
+	{
+		var i, len;
+		for (i = 0, len = arr.length; i < len; i++)
+		{
+			freeLine(arr[i]);
+		}
+		cr.clearArray(arr);
+	};
+	pluginProto.WordWrap = function (text, lines, ctx, width, wrapbyword)
+	{
+		if (!text || !text.length)
+		{
+			freeAllLines(lines);
+			return;
+		}
+		if (width <= 2.0)
+		{
+			freeAllLines(lines);
+			return;
+		}
+		if (text.length <= 100 && text.indexOf("\n") === -1)
+		{
+			var all_width = ctx.measureText(text).width;
+			if (all_width <= width)
+			{
+				freeAllLines(lines);
+				lines.push(allocLine());
+				lines[0].text = text;
+				lines[0].width = all_width;
+				return;
+			}
+		}
+		this.WrapText(text, lines, ctx, width, wrapbyword);
+	};
+	function trimSingleSpaceRight(str)
+	{
+		if (!str.length || str.charAt(str.length - 1) !== " ")
+			return str;
+		return str.substring(0, str.length - 1);
+	};
+	pluginProto.WrapText = function (text, lines, ctx, width, wrapbyword)
+	{
+		var wordArray;
+		if (wrapbyword)
+		{
+			this.TokeniseWords(text);	// writes to wordsCache
+			wordArray = wordsCache;
+		}
+		else
+			wordArray = text;
+		var cur_line = "";
+		var prev_line;
+		var line_width;
+		var i;
+		var lineIndex = 0;
+		var line;
+		for (i = 0; i < wordArray.length; i++)
+		{
+			if (wordArray[i] === "\n")
+			{
+				if (lineIndex >= lines.length)
+					lines.push(allocLine());
+				cur_line = trimSingleSpaceRight(cur_line);		// for correct center/right alignment
+				line = lines[lineIndex];
+				line.text = cur_line;
+				line.width = ctx.measureText(cur_line).width;
+				lineIndex++;
+				cur_line = "";
+				continue;
+			}
+			prev_line = cur_line;
+			cur_line += wordArray[i];
+			line_width = ctx.measureText(cur_line).width;
+			if (line_width >= width)
+			{
+				if (lineIndex >= lines.length)
+					lines.push(allocLine());
+				prev_line = trimSingleSpaceRight(prev_line);
+				line = lines[lineIndex];
+				line.text = prev_line;
+				line.width = ctx.measureText(prev_line).width;
+				lineIndex++;
+				cur_line = wordArray[i];
+				if (!wrapbyword && cur_line === " ")
+					cur_line = "";
+			}
+		}
+		if (cur_line.length)
+		{
+			if (lineIndex >= lines.length)
+				lines.push(allocLine());
+			cur_line = trimSingleSpaceRight(cur_line);
+			line = lines[lineIndex];
+			line.text = cur_line;
+			line.width = ctx.measureText(cur_line).width;
+			lineIndex++;
+		}
+		for (i = lineIndex; i < lines.length; i++)
+			freeLine(lines[i]);
+		lines.length = lineIndex;
+	};
+	function Cnds() {};
+	Cnds.prototype.CompareText = function(text_to_compare, case_sensitive)
+	{
+		if (case_sensitive)
+			return this.text == text_to_compare;
+		else
+			return cr.equals_nocase(this.text, text_to_compare);
+	};
+	pluginProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.SetText = function(param)
+	{
+		if (cr.is_number(param) && param < 1e9)
+			param = Math.round(param * 1e10) / 1e10;	// round to nearest ten billionth - hides floating point errors
+		var text_to_set = param.toString();
+		if (this.text !== text_to_set)
+		{
+			this.text = text_to_set;
+			this.text_changed = true;
+			this.runtime.redraw = true;
+		}
+	};
+	Acts.prototype.AppendText = function(param)
+	{
+		if (cr.is_number(param))
+			param = Math.round(param * 1e10) / 1e10;	// round to nearest ten billionth - hides floating point errors
+		var text_to_append = param.toString();
+		if (text_to_append)	// not empty
+		{
+			this.text += text_to_append;
+			this.text_changed = true;
+			this.runtime.redraw = true;
+		}
+	};
+	Acts.prototype.SetFontFace = function (face_, style_)
+	{
+		var newstyle = "";
+		switch (style_) {
+		case 1: newstyle = "bold"; break;
+		case 2: newstyle = "italic"; break;
+		case 3: newstyle = "bold italic"; break;
+		}
+		if (face_ === this.facename && newstyle === this.fontstyle)
+			return;		// no change
+		this.facename = face_;
+		this.fontstyle = newstyle;
+		this.updateFont();
+	};
+	Acts.prototype.SetFontSize = function (size_)
+	{
+		if (this.ptSize === size_)
+			return;
+		this.ptSize = size_;
+		this.pxHeight = Math.ceil((this.ptSize / 72.0) * 96.0) + 4;	// assume 96dpi...
+		this.updateFont();
+	};
+	Acts.prototype.SetFontColor = function (rgb)
+	{
+		var newcolor = "rgb(" + cr.GetRValue(rgb).toString() + "," + cr.GetGValue(rgb).toString() + "," + cr.GetBValue(rgb).toString() + ")";
+		if (newcolor === this.color)
+			return;
+		this.color = newcolor;
+		this.need_text_redraw = true;
+		this.runtime.redraw = true;
+	};
+	Acts.prototype.SetWebFont = function (familyname_, cssurl_)
+	{
+		if (this.runtime.isDomFree)
+		{
+			cr.logexport("[Construct 2] Text plugin: 'Set web font' not supported on this platform - the action has been ignored");
+			return;		// DC todo
+		}
+		var self = this;
+		var refreshFunc = (function () {
+							self.runtime.redraw = true;
+							self.text_changed = true;
+						});
+		if (requestedWebFonts.hasOwnProperty(cssurl_))
+		{
+			var newfacename = "'" + familyname_ + "'";
+			if (this.facename === newfacename)
+				return;	// no change
+			this.facename = newfacename;
+			this.updateFont();
+			for (var i = 1; i < 10; i++)
+			{
+				setTimeout(refreshFunc, i * 100);
+				setTimeout(refreshFunc, i * 1000);
+			}
+			return;
+		}
+		var wf = document.createElement("link");
+		wf.href = cssurl_;
+		wf.rel = "stylesheet";
+		wf.type = "text/css";
+		wf.onload = refreshFunc;
+		document.getElementsByTagName('head')[0].appendChild(wf);
+		requestedWebFonts[cssurl_] = true;
+		this.facename = "'" + familyname_ + "'";
+		this.updateFont();
+		for (var i = 1; i < 10; i++)
+		{
+			setTimeout(refreshFunc, i * 100);
+			setTimeout(refreshFunc, i * 1000);
+		}
+;
+	};
+	Acts.prototype.SetEffect = function (effect)
+	{
+		this.blend_mode = effect;
+		this.compositeOp = cr.effectToCompositeOp(effect);
+		cr.setGLBlend(this, effect, this.runtime.gl);
+		this.runtime.redraw = true;
+	};
+	pluginProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.Text = function(ret)
+	{
+		ret.set_string(this.text);
+	};
+	Exps.prototype.FaceName = function (ret)
+	{
+		ret.set_string(this.facename);
+	};
+	Exps.prototype.FaceSize = function (ret)
+	{
+		ret.set_int(this.ptSize);
+	};
+	Exps.prototype.TextWidth = function (ret)
+	{
+		var w = 0;
+		var i, len, x;
+		for (i = 0, len = this.lines.length; i < len; i++)
+		{
+			x = this.lines[i].width;
+			if (w < x)
+				w = x;
+		}
+		ret.set_int(w);
+	};
+	Exps.prototype.TextHeight = function (ret)
+	{
+		ret.set_int(this.lines.length * (this.pxHeight + this.line_height_offset) - this.line_height_offset);
+	};
+	pluginProto.exps = new Exps();
+}());
+;
+;
 cr.plugins_.TiledBg = function(runtime)
 {
 	this.runtime = runtime;
@@ -22320,1174 +24808,6 @@ cr.plugins_.TiledBg = function(runtime)
 	Exps.prototype.ImageHeight = function (ret)
 	{
 		ret.set_float(this.texture_img.height);
-	};
-	pluginProto.exps = new Exps();
-}());
-;
-;
-cr.plugins_.Touch = function(runtime)
-{
-	this.runtime = runtime;
-};
-(function ()
-{
-	var pluginProto = cr.plugins_.Touch.prototype;
-	pluginProto.Type = function(plugin)
-	{
-		this.plugin = plugin;
-		this.runtime = plugin.runtime;
-	};
-	var typeProto = pluginProto.Type.prototype;
-	typeProto.onCreate = function()
-	{
-	};
-	pluginProto.Instance = function(type)
-	{
-		this.type = type;
-		this.runtime = type.runtime;
-		this.touches = [];
-		this.mouseDown = false;
-	};
-	var instanceProto = pluginProto.Instance.prototype;
-	var dummyoffset = {left: 0, top: 0};
-	instanceProto.findTouch = function (id)
-	{
-		var i, len;
-		for (i = 0, len = this.touches.length; i < len; i++)
-		{
-			if (this.touches[i]["id"] === id)
-				return i;
-		}
-		return -1;
-	};
-	var appmobi_accx = 0;
-	var appmobi_accy = 0;
-	var appmobi_accz = 0;
-	function AppMobiGetAcceleration(evt)
-	{
-		appmobi_accx = evt.x;
-		appmobi_accy = evt.y;
-		appmobi_accz = evt.z;
-	};
-	var pg_accx = 0;
-	var pg_accy = 0;
-	var pg_accz = 0;
-	function PhoneGapGetAcceleration(evt)
-	{
-		pg_accx = evt.x;
-		pg_accy = evt.y;
-		pg_accz = evt.z;
-	};
-	var theInstance = null;
-	var touchinfo_cache = [];
-	function AllocTouchInfo(x, y, id, index)
-	{
-		var ret;
-		if (touchinfo_cache.length)
-			ret = touchinfo_cache.pop();
-		else
-			ret = new TouchInfo();
-		ret.init(x, y, id, index);
-		return ret;
-	};
-	function ReleaseTouchInfo(ti)
-	{
-		if (touchinfo_cache.length < 100)
-			touchinfo_cache.push(ti);
-	};
-	var GESTURE_HOLD_THRESHOLD = 15;		// max px motion for hold gesture to register
-	var GESTURE_HOLD_TIMEOUT = 500;			// time for hold gesture to register
-	var GESTURE_TAP_TIMEOUT = 333;			// time for tap gesture to register
-	var GESTURE_DOUBLETAP_THRESHOLD = 25;	// max distance apart for taps to be
-	function TouchInfo()
-	{
-		this.starttime = 0;
-		this.time = 0;
-		this.lasttime = 0;
-		this.startx = 0;
-		this.starty = 0;
-		this.x = 0;
-		this.y = 0;
-		this.lastx = 0;
-		this.lasty = 0;
-		this["id"] = 0;
-		this.startindex = 0;
-		this.triggeredHold = false;
-		this.tooFarForHold = false;
-	};
-	TouchInfo.prototype.init = function (x, y, id, index)
-	{
-		var nowtime = cr.performance_now();
-		this.time = nowtime;
-		this.lasttime = nowtime;
-		this.starttime = nowtime;
-		this.startx = x;
-		this.starty = y;
-		this.x = x;
-		this.y = y;
-		this.lastx = x;
-		this.lasty = y;
-		this.width = 0;
-		this.height = 0;
-		this.pressure = 0;
-		this["id"] = id;
-		this.startindex = index;
-		this.triggeredHold = false;
-		this.tooFarForHold = false;
-	};
-	TouchInfo.prototype.update = function (nowtime, x, y, width, height, pressure)
-	{
-		this.lasttime = this.time;
-		this.time = nowtime;
-		this.lastx = this.x;
-		this.lasty = this.y;
-		this.x = x;
-		this.y = y;
-		this.width = width;
-		this.height = height;
-		this.pressure = pressure;
-		if (!this.tooFarForHold && cr.distanceTo(this.startx, this.starty, this.x, this.y) >= GESTURE_HOLD_THRESHOLD)
-		{
-			this.tooFarForHold = true;
-		}
-	};
-	TouchInfo.prototype.maybeTriggerHold = function (inst, index)
-	{
-		if (this.triggeredHold)
-			return;		// already triggered this gesture
-		var nowtime = cr.performance_now();
-		if (nowtime - this.starttime >= GESTURE_HOLD_TIMEOUT && !this.tooFarForHold && cr.distanceTo(this.startx, this.starty, this.x, this.y) < GESTURE_HOLD_THRESHOLD)
-		{
-			this.triggeredHold = true;
-			inst.trigger_index = this.startindex;
-			inst.trigger_id = this["id"];
-			inst.getTouchIndex = index;
-			inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnHoldGesture, inst);
-			inst.curTouchX = this.x;
-			inst.curTouchY = this.y;
-			inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnHoldGestureObject, inst);
-			inst.getTouchIndex = 0;
-		}
-	};
-	var lastTapX = -1000;
-	var lastTapY = -1000;
-	var lastTapTime = -10000;
-	TouchInfo.prototype.maybeTriggerTap = function (inst, index)
-	{
-		if (this.triggeredHold)
-			return;
-		var nowtime = cr.performance_now();
-		if (nowtime - this.starttime <= GESTURE_TAP_TIMEOUT && !this.tooFarForHold && cr.distanceTo(this.startx, this.starty, this.x, this.y) < GESTURE_HOLD_THRESHOLD)
-		{
-			inst.trigger_index = this.startindex;
-			inst.trigger_id = this["id"];
-			inst.getTouchIndex = index;
-			if ((nowtime - lastTapTime <= GESTURE_TAP_TIMEOUT * 2) && cr.distanceTo(lastTapX, lastTapY, this.x, this.y) < GESTURE_DOUBLETAP_THRESHOLD)
-			{
-				inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnDoubleTapGesture, inst);
-				inst.curTouchX = this.x;
-				inst.curTouchY = this.y;
-				inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnDoubleTapGestureObject, inst);
-				lastTapX = -1000;
-				lastTapY = -1000;
-				lastTapTime = -10000;
-			}
-			else
-			{
-				inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTapGesture, inst);
-				inst.curTouchX = this.x;
-				inst.curTouchY = this.y;
-				inst.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTapGestureObject, inst);
-				lastTapX = this.x;
-				lastTapY = this.y;
-				lastTapTime = nowtime;
-			}
-			inst.getTouchIndex = 0;
-		}
-	};
-	instanceProto.onCreate = function()
-	{
-		theInstance = this;
-		this.isWindows8 = !!(typeof window["c2isWindows8"] !== "undefined" && window["c2isWindows8"]);
-		this.orient_alpha = 0;
-		this.orient_beta = 0;
-		this.orient_gamma = 0;
-		this.acc_g_x = 0;
-		this.acc_g_y = 0;
-		this.acc_g_z = 0;
-		this.acc_x = 0;
-		this.acc_y = 0;
-		this.acc_z = 0;
-		this.curTouchX = 0;
-		this.curTouchY = 0;
-		this.trigger_index = 0;
-		this.trigger_id = 0;
-		this.getTouchIndex = 0;
-		this.useMouseInput = (this.properties[0] !== 0);
-		var elem = (this.runtime.fullscreen_mode > 0) ? document : this.runtime.canvas;
-		var elem2 = document;
-		if (this.runtime.isDirectCanvas)
-			elem2 = elem = window["Canvas"];
-		else if (this.runtime.isCocoonJs)
-			elem2 = elem = window;
-		var self = this;
-		if (window.navigator["pointerEnabled"])
-		{
-			elem.addEventListener("pointerdown",
-				function(info) {
-					self.onPointerStart(info);
-				},
-				false
-			);
-			elem.addEventListener("pointermove",
-				function(info) {
-					self.onPointerMove(info);
-				},
-				false
-			);
-			elem2.addEventListener("pointerup",
-				function(info) {
-					self.onPointerEnd(info, false);
-				},
-				false
-			);
-			elem2.addEventListener("pointercancel",
-				function(info) {
-					self.onPointerEnd(info, true);
-				},
-				false
-			);
-			if (this.runtime.canvas)
-			{
-				this.runtime.canvas.addEventListener("MSGestureHold", function(e) {
-					e.preventDefault();
-				}, false);
-				document.addEventListener("MSGestureHold", function(e) {
-					e.preventDefault();
-				}, false);
-				this.runtime.canvas.addEventListener("gesturehold", function(e) {
-					e.preventDefault();
-				}, false);
-				document.addEventListener("gesturehold", function(e) {
-					e.preventDefault();
-				}, false);
-			}
-		}
-		else if (window.navigator["msPointerEnabled"])
-		{
-			elem.addEventListener("MSPointerDown",
-				function(info) {
-					self.onPointerStart(info);
-				},
-				false
-			);
-			elem.addEventListener("MSPointerMove",
-				function(info) {
-					self.onPointerMove(info);
-				},
-				false
-			);
-			elem2.addEventListener("MSPointerUp",
-				function(info) {
-					self.onPointerEnd(info, false);
-				},
-				false
-			);
-			elem2.addEventListener("MSPointerCancel",
-				function(info) {
-					self.onPointerEnd(info, true);
-				},
-				false
-			);
-			if (this.runtime.canvas)
-			{
-				this.runtime.canvas.addEventListener("MSGestureHold", function(e) {
-					e.preventDefault();
-				}, false);
-				document.addEventListener("MSGestureHold", function(e) {
-					e.preventDefault();
-				}, false);
-			}
-		}
-		else
-		{
-			elem.addEventListener("touchstart",
-				function(info) {
-					self.onTouchStart(info);
-				},
-				false
-			);
-			elem.addEventListener("touchmove",
-				function(info) {
-					self.onTouchMove(info);
-				},
-				false
-			);
-			elem2.addEventListener("touchend",
-				function(info) {
-					self.onTouchEnd(info, false);
-				},
-				false
-			);
-			elem2.addEventListener("touchcancel",
-				function(info) {
-					self.onTouchEnd(info, true);
-				},
-				false
-			);
-		}
-		if (this.isWindows8)
-		{
-			var win8accelerometerFn = function(e) {
-					var reading = e["reading"];
-					self.acc_x = reading["accelerationX"];
-					self.acc_y = reading["accelerationY"];
-					self.acc_z = reading["accelerationZ"];
-				};
-			var win8inclinometerFn = function(e) {
-					var reading = e["reading"];
-					self.orient_alpha = reading["yawDegrees"];
-					self.orient_beta = reading["pitchDegrees"];
-					self.orient_gamma = reading["rollDegrees"];
-				};
-			var accelerometer = Windows["Devices"]["Sensors"]["Accelerometer"]["getDefault"]();
-            if (accelerometer)
-			{
-                accelerometer["reportInterval"] = Math.max(accelerometer["minimumReportInterval"], 16);
-				accelerometer.addEventListener("readingchanged", win8accelerometerFn);
-            }
-			var inclinometer = Windows["Devices"]["Sensors"]["Inclinometer"]["getDefault"]();
-			if (inclinometer)
-			{
-				inclinometer["reportInterval"] = Math.max(inclinometer["minimumReportInterval"], 16);
-				inclinometer.addEventListener("readingchanged", win8inclinometerFn);
-			}
-			document.addEventListener("visibilitychange", function(e) {
-				if (document["hidden"] || document["msHidden"])
-				{
-					if (accelerometer)
-						accelerometer.removeEventListener("readingchanged", win8accelerometerFn);
-					if (inclinometer)
-						inclinometer.removeEventListener("readingchanged", win8inclinometerFn);
-				}
-				else
-				{
-					if (accelerometer)
-						accelerometer.addEventListener("readingchanged", win8accelerometerFn);
-					if (inclinometer)
-						inclinometer.addEventListener("readingchanged", win8inclinometerFn);
-				}
-			}, false);
-		}
-		else
-		{
-			window.addEventListener("deviceorientation", function (eventData) {
-				self.orient_alpha = eventData["alpha"] || 0;
-				self.orient_beta = eventData["beta"] || 0;
-				self.orient_gamma = eventData["gamma"] || 0;
-			}, false);
-			window.addEventListener("devicemotion", function (eventData) {
-				if (eventData["accelerationIncludingGravity"])
-				{
-					self.acc_g_x = eventData["accelerationIncludingGravity"]["x"] || 0;
-					self.acc_g_y = eventData["accelerationIncludingGravity"]["y"] || 0;
-					self.acc_g_z = eventData["accelerationIncludingGravity"]["z"] || 0;
-				}
-				if (eventData["acceleration"])
-				{
-					self.acc_x = eventData["acceleration"]["x"] || 0;
-					self.acc_y = eventData["acceleration"]["y"] || 0;
-					self.acc_z = eventData["acceleration"]["z"] || 0;
-				}
-			}, false);
-		}
-		if (this.useMouseInput && !this.runtime.isDomFree)
-		{
-			jQuery(document).mousemove(
-				function(info) {
-					self.onMouseMove(info);
-				}
-			);
-			jQuery(document).mousedown(
-				function(info) {
-					self.onMouseDown(info);
-				}
-			);
-			jQuery(document).mouseup(
-				function(info) {
-					self.onMouseUp(info);
-				}
-			);
-		}
-		if (!this.runtime.isiOS && this.runtime.isCordova && navigator["accelerometer"] && navigator["accelerometer"]["watchAcceleration"])
-		{
-			navigator["accelerometer"]["watchAcceleration"](PhoneGapGetAcceleration, null, { "frequency": 40 });
-		}
-		this.runtime.tick2Me(this);
-	};
-	instanceProto.onPointerMove = function (info)
-	{
-		if (info["pointerType"] === info["MSPOINTER_TYPE_MOUSE"] || info["pointerType"] === "mouse")
-			return;
-		if (info.preventDefault)
-			info.preventDefault();
-		var i = this.findTouch(info["pointerId"]);
-		var nowtime = cr.performance_now();
-		if (i >= 0)
-		{
-			var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
-			var t = this.touches[i];
-			if (nowtime - t.time < 2)
-				return;
-			t.update(nowtime, info.pageX - offset.left, info.pageY - offset.top, info.width || 0, info.height || 0, info.pressure || 0);
-		}
-	};
-	instanceProto.onPointerStart = function (info)
-	{
-		if (info["pointerType"] === info["MSPOINTER_TYPE_MOUSE"] || info["pointerType"] === "mouse")
-			return;
-		if (info.preventDefault && cr.isCanvasInputEvent(info))
-			info.preventDefault();
-		var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
-		var touchx = info.pageX - offset.left;
-		var touchy = info.pageY - offset.top;
-		var nowtime = cr.performance_now();
-		this.trigger_index = this.touches.length;
-		this.trigger_id = info["pointerId"];
-		this.touches.push(AllocTouchInfo(touchx, touchy, info["pointerId"], this.trigger_index));
-		this.runtime.isInUserInputEvent = true;
-		this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnNthTouchStart, this);
-		this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchStart, this);
-		this.curTouchX = touchx;
-		this.curTouchY = touchy;
-		this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchObject, this);
-		this.runtime.isInUserInputEvent = false;
-	};
-	instanceProto.onPointerEnd = function (info, isCancel)
-	{
-		if (info["pointerType"] === info["MSPOINTER_TYPE_MOUSE"] || info["pointerType"] === "mouse")
-			return;
-		if (info.preventDefault && cr.isCanvasInputEvent(info))
-			info.preventDefault();
-		var i = this.findTouch(info["pointerId"]);
-		this.trigger_index = (i >= 0 ? this.touches[i].startindex : -1);
-		this.trigger_id = (i >= 0 ? this.touches[i]["id"] : -1);
-		this.runtime.isInUserInputEvent = true;
-		this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnNthTouchEnd, this);
-		this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchEnd, this);
-		if (i >= 0)
-		{
-			if (!isCancel)
-				this.touches[i].maybeTriggerTap(this, i);
-			ReleaseTouchInfo(this.touches[i]);
-			this.touches.splice(i, 1);
-		}
-		this.runtime.isInUserInputEvent = false;
-	};
-	instanceProto.onTouchMove = function (info)
-	{
-		if (info.preventDefault)
-			info.preventDefault();
-		var nowtime = cr.performance_now();
-		var i, len, t, u;
-		for (i = 0, len = info.changedTouches.length; i < len; i++)
-		{
-			t = info.changedTouches[i];
-			var j = this.findTouch(t["identifier"]);
-			if (j >= 0)
-			{
-				var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
-				u = this.touches[j];
-				if (nowtime - u.time < 2)
-					continue;
-				var touchWidth = (t.radiusX || t.webkitRadiusX || t.mozRadiusX || t.msRadiusX || 0) * 2;
-				var touchHeight = (t.radiusY || t.webkitRadiusY || t.mozRadiusY || t.msRadiusY || 0) * 2;
-				var touchForce = t.force || t.webkitForce || t.mozForce || t.msForce || 0;
-				u.update(nowtime, t.pageX - offset.left, t.pageY - offset.top, touchWidth, touchHeight, touchForce);
-			}
-		}
-	};
-	instanceProto.onTouchStart = function (info)
-	{
-		if (info.preventDefault && cr.isCanvasInputEvent(info))
-			info.preventDefault();
-		var offset = this.runtime.isDomFree ? dummyoffset : jQuery(this.runtime.canvas).offset();
-		var nowtime = cr.performance_now();
-		this.runtime.isInUserInputEvent = true;
-		var i, len, t, j;
-		for (i = 0, len = info.changedTouches.length; i < len; i++)
-		{
-			t = info.changedTouches[i];
-			j = this.findTouch(t["identifier"]);
-			if (j !== -1)
-				continue;
-			var touchx = t.pageX - offset.left;
-			var touchy = t.pageY - offset.top;
-			this.trigger_index = this.touches.length;
-			this.trigger_id = t["identifier"];
-			this.touches.push(AllocTouchInfo(touchx, touchy, t["identifier"], this.trigger_index));
-			this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnNthTouchStart, this);
-			this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchStart, this);
-			this.curTouchX = touchx;
-			this.curTouchY = touchy;
-			this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchObject, this);
-		}
-		this.runtime.isInUserInputEvent = false;
-	};
-	instanceProto.onTouchEnd = function (info, isCancel)
-	{
-		if (info.preventDefault && cr.isCanvasInputEvent(info))
-			info.preventDefault();
-		this.runtime.isInUserInputEvent = true;
-		var i, len, t, j;
-		for (i = 0, len = info.changedTouches.length; i < len; i++)
-		{
-			t = info.changedTouches[i];
-			j = this.findTouch(t["identifier"]);
-			if (j >= 0)
-			{
-				this.trigger_index = this.touches[j].startindex;
-				this.trigger_id = this.touches[j]["id"];
-				this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnNthTouchEnd, this);
-				this.runtime.trigger(cr.plugins_.Touch.prototype.cnds.OnTouchEnd, this);
-				if (!isCancel)
-					this.touches[j].maybeTriggerTap(this, j);
-				ReleaseTouchInfo(this.touches[j]);
-				this.touches.splice(j, 1);
-			}
-		}
-		this.runtime.isInUserInputEvent = false;
-	};
-	instanceProto.getAlpha = function ()
-	{
-		if (this.runtime.isCordova && this.orient_alpha === 0 && pg_accz !== 0)
-			return pg_accz * 90;
-		else
-			return this.orient_alpha;
-	};
-	instanceProto.getBeta = function ()
-	{
-		if (this.runtime.isCordova && this.orient_beta === 0 && pg_accy !== 0)
-			return pg_accy * 90;
-		else
-			return this.orient_beta;
-	};
-	instanceProto.getGamma = function ()
-	{
-		if (this.runtime.isCordova && this.orient_gamma === 0 && pg_accx !== 0)
-			return pg_accx * 90;
-		else
-			return this.orient_gamma;
-	};
-	var noop_func = function(){};
-	instanceProto.onMouseDown = function(info)
-	{
-		var t = { pageX: info.pageX, pageY: info.pageY, "identifier": 0 };
-		var fakeinfo = { changedTouches: [t] };
-		this.onTouchStart(fakeinfo);
-		this.mouseDown = true;
-	};
-	instanceProto.onMouseMove = function(info)
-	{
-		if (!this.mouseDown)
-			return;
-		var t = { pageX: info.pageX, pageY: info.pageY, "identifier": 0 };
-		var fakeinfo = { changedTouches: [t] };
-		this.onTouchMove(fakeinfo);
-	};
-	instanceProto.onMouseUp = function(info)
-	{
-		if (info.preventDefault && this.runtime.had_a_click && !this.runtime.isMobile)
-			info.preventDefault();
-		this.runtime.had_a_click = true;
-		var t = { pageX: info.pageX, pageY: info.pageY, "identifier": 0 };
-		var fakeinfo = { changedTouches: [t] };
-		this.onTouchEnd(fakeinfo);
-		this.mouseDown = false;
-	};
-	instanceProto.tick2 = function()
-	{
-		var i, len, t;
-		var nowtime = cr.performance_now();
-		for (i = 0, len = this.touches.length; i < len; ++i)
-		{
-			t = this.touches[i];
-			if (t.time <= nowtime - 50)
-				t.lasttime = nowtime;
-			t.maybeTriggerHold(this, i);
-		}
-	};
-	function Cnds() {};
-	Cnds.prototype.OnTouchStart = function ()
-	{
-		return true;
-	};
-	Cnds.prototype.OnTouchEnd = function ()
-	{
-		return true;
-	};
-	Cnds.prototype.IsInTouch = function ()
-	{
-		return this.touches.length;
-	};
-	Cnds.prototype.OnTouchObject = function (type)
-	{
-		if (!type)
-			return false;
-		return this.runtime.testAndSelectCanvasPointOverlap(type, this.curTouchX, this.curTouchY, false);
-	};
-	var touching = [];
-	Cnds.prototype.IsTouchingObject = function (type)
-	{
-		if (!type)
-			return false;
-		var sol = type.getCurrentSol();
-		var instances = sol.getObjects();
-		var px, py;
-		var i, leni, j, lenj;
-		for (i = 0, leni = instances.length; i < leni; i++)
-		{
-			var inst = instances[i];
-			inst.update_bbox();
-			for (j = 0, lenj = this.touches.length; j < lenj; j++)
-			{
-				var touch = this.touches[j];
-				px = inst.layer.canvasToLayer(touch.x, touch.y, true);
-				py = inst.layer.canvasToLayer(touch.x, touch.y, false);
-				if (inst.contains_pt(px, py))
-				{
-					touching.push(inst);
-					break;
-				}
-			}
-		}
-		if (touching.length)
-		{
-			sol.select_all = false;
-			cr.shallowAssignArray(sol.instances, touching);
-			type.applySolToContainer();
-			cr.clearArray(touching);
-			return true;
-		}
-		else
-			return false;
-	};
-	Cnds.prototype.CompareTouchSpeed = function (index, cmp, s)
-	{
-		index = Math.floor(index);
-		if (index < 0 || index >= this.touches.length)
-			return false;
-		var t = this.touches[index];
-		var dist = cr.distanceTo(t.x, t.y, t.lastx, t.lasty);
-		var timediff = (t.time - t.lasttime) / 1000;
-		var speed = 0;
-		if (timediff > 0)
-			speed = dist / timediff;
-		return cr.do_cmp(speed, cmp, s);
-	};
-	Cnds.prototype.OrientationSupported = function ()
-	{
-		return typeof window["DeviceOrientationEvent"] !== "undefined";
-	};
-	Cnds.prototype.MotionSupported = function ()
-	{
-		return typeof window["DeviceMotionEvent"] !== "undefined";
-	};
-	Cnds.prototype.CompareOrientation = function (orientation_, cmp_, angle_)
-	{
-		var v = 0;
-		if (orientation_ === 0)
-			v = this.getAlpha();
-		else if (orientation_ === 1)
-			v = this.getBeta();
-		else
-			v = this.getGamma();
-		return cr.do_cmp(v, cmp_, angle_);
-	};
-	Cnds.prototype.CompareAcceleration = function (acceleration_, cmp_, angle_)
-	{
-		var v = 0;
-		if (acceleration_ === 0)
-			v = this.acc_g_x;
-		else if (acceleration_ === 1)
-			v = this.acc_g_y;
-		else if (acceleration_ === 2)
-			v = this.acc_g_z;
-		else if (acceleration_ === 3)
-			v = this.acc_x;
-		else if (acceleration_ === 4)
-			v = this.acc_y;
-		else if (acceleration_ === 5)
-			v = this.acc_z;
-		return cr.do_cmp(v, cmp_, angle_);
-	};
-	Cnds.prototype.OnNthTouchStart = function (touch_)
-	{
-		touch_ = Math.floor(touch_);
-		return touch_ === this.trigger_index;
-	};
-	Cnds.prototype.OnNthTouchEnd = function (touch_)
-	{
-		touch_ = Math.floor(touch_);
-		return touch_ === this.trigger_index;
-	};
-	Cnds.prototype.HasNthTouch = function (touch_)
-	{
-		touch_ = Math.floor(touch_);
-		return this.touches.length >= touch_ + 1;
-	};
-	Cnds.prototype.OnHoldGesture = function ()
-	{
-		return true;
-	};
-	Cnds.prototype.OnTapGesture = function ()
-	{
-		return true;
-	};
-	Cnds.prototype.OnDoubleTapGesture = function ()
-	{
-		return true;
-	};
-	Cnds.prototype.OnHoldGestureObject = function (type)
-	{
-		if (!type)
-			return false;
-		return this.runtime.testAndSelectCanvasPointOverlap(type, this.curTouchX, this.curTouchY, false);
-	};
-	Cnds.prototype.OnTapGestureObject = function (type)
-	{
-		if (!type)
-			return false;
-		return this.runtime.testAndSelectCanvasPointOverlap(type, this.curTouchX, this.curTouchY, false);
-	};
-	Cnds.prototype.OnDoubleTapGestureObject = function (type)
-	{
-		if (!type)
-			return false;
-		return this.runtime.testAndSelectCanvasPointOverlap(type, this.curTouchX, this.curTouchY, false);
-	};
-	pluginProto.cnds = new Cnds();
-	function Exps() {};
-	Exps.prototype.TouchCount = function (ret)
-	{
-		ret.set_int(this.touches.length);
-	};
-	Exps.prototype.X = function (ret, layerparam)
-	{
-		var index = this.getTouchIndex;
-		if (index < 0 || index >= this.touches.length)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var layer, oldScale, oldZoomRate, oldParallaxX, oldAngle;
-		if (cr.is_undefined(layerparam))
-		{
-			layer = this.runtime.getLayerByNumber(0);
-			oldScale = layer.scale;
-			oldZoomRate = layer.zoomRate;
-			oldParallaxX = layer.parallaxX;
-			oldAngle = layer.angle;
-			layer.scale = 1;
-			layer.zoomRate = 1.0;
-			layer.parallaxX = 1.0;
-			layer.angle = 0;
-			ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, true));
-			layer.scale = oldScale;
-			layer.zoomRate = oldZoomRate;
-			layer.parallaxX = oldParallaxX;
-			layer.angle = oldAngle;
-		}
-		else
-		{
-			if (cr.is_number(layerparam))
-				layer = this.runtime.getLayerByNumber(layerparam);
-			else
-				layer = this.runtime.getLayerByName(layerparam);
-			if (layer)
-				ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, true));
-			else
-				ret.set_float(0);
-		}
-	};
-	Exps.prototype.XAt = function (ret, index, layerparam)
-	{
-		index = Math.floor(index);
-		if (index < 0 || index >= this.touches.length)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var layer, oldScale, oldZoomRate, oldParallaxX, oldAngle;
-		if (cr.is_undefined(layerparam))
-		{
-			layer = this.runtime.getLayerByNumber(0);
-			oldScale = layer.scale;
-			oldZoomRate = layer.zoomRate;
-			oldParallaxX = layer.parallaxX;
-			oldAngle = layer.angle;
-			layer.scale = 1;
-			layer.zoomRate = 1.0;
-			layer.parallaxX = 1.0;
-			layer.angle = 0;
-			ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, true));
-			layer.scale = oldScale;
-			layer.zoomRate = oldZoomRate;
-			layer.parallaxX = oldParallaxX;
-			layer.angle = oldAngle;
-		}
-		else
-		{
-			if (cr.is_number(layerparam))
-				layer = this.runtime.getLayerByNumber(layerparam);
-			else
-				layer = this.runtime.getLayerByName(layerparam);
-			if (layer)
-				ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, true));
-			else
-				ret.set_float(0);
-		}
-	};
-	Exps.prototype.XForID = function (ret, id, layerparam)
-	{
-		var index = this.findTouch(id);
-		if (index < 0)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var touch = this.touches[index];
-		var layer, oldScale, oldZoomRate, oldParallaxX, oldAngle;
-		if (cr.is_undefined(layerparam))
-		{
-			layer = this.runtime.getLayerByNumber(0);
-			oldScale = layer.scale;
-			oldZoomRate = layer.zoomRate;
-			oldParallaxX = layer.parallaxX;
-			oldAngle = layer.angle;
-			layer.scale = 1;
-			layer.zoomRate = 1.0;
-			layer.parallaxX = 1.0;
-			layer.angle = 0;
-			ret.set_float(layer.canvasToLayer(touch.x, touch.y, true));
-			layer.scale = oldScale;
-			layer.zoomRate = oldZoomRate;
-			layer.parallaxX = oldParallaxX;
-			layer.angle = oldAngle;
-		}
-		else
-		{
-			if (cr.is_number(layerparam))
-				layer = this.runtime.getLayerByNumber(layerparam);
-			else
-				layer = this.runtime.getLayerByName(layerparam);
-			if (layer)
-				ret.set_float(layer.canvasToLayer(touch.x, touch.y, true));
-			else
-				ret.set_float(0);
-		}
-	};
-	Exps.prototype.Y = function (ret, layerparam)
-	{
-		var index = this.getTouchIndex;
-		if (index < 0 || index >= this.touches.length)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var layer, oldScale, oldZoomRate, oldParallaxY, oldAngle;
-		if (cr.is_undefined(layerparam))
-		{
-			layer = this.runtime.getLayerByNumber(0);
-			oldScale = layer.scale;
-			oldZoomRate = layer.zoomRate;
-			oldParallaxY = layer.parallaxY;
-			oldAngle = layer.angle;
-			layer.scale = 1;
-			layer.zoomRate = 1.0;
-			layer.parallaxY = 1.0;
-			layer.angle = 0;
-			ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, false));
-			layer.scale = oldScale;
-			layer.zoomRate = oldZoomRate;
-			layer.parallaxY = oldParallaxY;
-			layer.angle = oldAngle;
-		}
-		else
-		{
-			if (cr.is_number(layerparam))
-				layer = this.runtime.getLayerByNumber(layerparam);
-			else
-				layer = this.runtime.getLayerByName(layerparam);
-			if (layer)
-				ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, false));
-			else
-				ret.set_float(0);
-		}
-	};
-	Exps.prototype.YAt = function (ret, index, layerparam)
-	{
-		index = Math.floor(index);
-		if (index < 0 || index >= this.touches.length)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var layer, oldScale, oldZoomRate, oldParallaxY, oldAngle;
-		if (cr.is_undefined(layerparam))
-		{
-			layer = this.runtime.getLayerByNumber(0);
-			oldScale = layer.scale;
-			oldZoomRate = layer.zoomRate;
-			oldParallaxY = layer.parallaxY;
-			oldAngle = layer.angle;
-			layer.scale = 1;
-			layer.zoomRate = 1.0;
-			layer.parallaxY = 1.0;
-			layer.angle = 0;
-			ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, false));
-			layer.scale = oldScale;
-			layer.zoomRate = oldZoomRate;
-			layer.parallaxY = oldParallaxY;
-			layer.angle = oldAngle;
-		}
-		else
-		{
-			if (cr.is_number(layerparam))
-				layer = this.runtime.getLayerByNumber(layerparam);
-			else
-				layer = this.runtime.getLayerByName(layerparam);
-			if (layer)
-				ret.set_float(layer.canvasToLayer(this.touches[index].x, this.touches[index].y, false));
-			else
-				ret.set_float(0);
-		}
-	};
-	Exps.prototype.YForID = function (ret, id, layerparam)
-	{
-		var index = this.findTouch(id);
-		if (index < 0)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var touch = this.touches[index];
-		var layer, oldScale, oldZoomRate, oldParallaxY, oldAngle;
-		if (cr.is_undefined(layerparam))
-		{
-			layer = this.runtime.getLayerByNumber(0);
-			oldScale = layer.scale;
-			oldZoomRate = layer.zoomRate;
-			oldParallaxY = layer.parallaxY;
-			oldAngle = layer.angle;
-			layer.scale = 1;
-			layer.zoomRate = 1.0;
-			layer.parallaxY = 1.0;
-			layer.angle = 0;
-			ret.set_float(layer.canvasToLayer(touch.x, touch.y, false));
-			layer.scale = oldScale;
-			layer.zoomRate = oldZoomRate;
-			layer.parallaxY = oldParallaxY;
-			layer.angle = oldAngle;
-		}
-		else
-		{
-			if (cr.is_number(layerparam))
-				layer = this.runtime.getLayerByNumber(layerparam);
-			else
-				layer = this.runtime.getLayerByName(layerparam);
-			if (layer)
-				ret.set_float(layer.canvasToLayer(touch.x, touch.y, false));
-			else
-				ret.set_float(0);
-		}
-	};
-	Exps.prototype.AbsoluteX = function (ret)
-	{
-		if (this.touches.length)
-			ret.set_float(this.touches[0].x);
-		else
-			ret.set_float(0);
-	};
-	Exps.prototype.AbsoluteXAt = function (ret, index)
-	{
-		index = Math.floor(index);
-		if (index < 0 || index >= this.touches.length)
-		{
-			ret.set_float(0);
-			return;
-		}
-		ret.set_float(this.touches[index].x);
-	};
-	Exps.prototype.AbsoluteXForID = function (ret, id)
-	{
-		var index = this.findTouch(id);
-		if (index < 0)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var touch = this.touches[index];
-		ret.set_float(touch.x);
-	};
-	Exps.prototype.AbsoluteY = function (ret)
-	{
-		if (this.touches.length)
-			ret.set_float(this.touches[0].y);
-		else
-			ret.set_float(0);
-	};
-	Exps.prototype.AbsoluteYAt = function (ret, index)
-	{
-		index = Math.floor(index);
-		if (index < 0 || index >= this.touches.length)
-		{
-			ret.set_float(0);
-			return;
-		}
-		ret.set_float(this.touches[index].y);
-	};
-	Exps.prototype.AbsoluteYForID = function (ret, id)
-	{
-		var index = this.findTouch(id);
-		if (index < 0)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var touch = this.touches[index];
-		ret.set_float(touch.y);
-	};
-	Exps.prototype.SpeedAt = function (ret, index)
-	{
-		index = Math.floor(index);
-		if (index < 0 || index >= this.touches.length)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var t = this.touches[index];
-		var dist = cr.distanceTo(t.x, t.y, t.lastx, t.lasty);
-		var timediff = (t.time - t.lasttime) / 1000;
-		if (timediff === 0)
-			ret.set_float(0);
-		else
-			ret.set_float(dist / timediff);
-	};
-	Exps.prototype.SpeedForID = function (ret, id)
-	{
-		var index = this.findTouch(id);
-		if (index < 0)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var touch = this.touches[index];
-		var dist = cr.distanceTo(touch.x, touch.y, touch.lastx, touch.lasty);
-		var timediff = (touch.time - touch.lasttime) / 1000;
-		if (timediff === 0)
-			ret.set_float(0);
-		else
-			ret.set_float(dist / timediff);
-	};
-	Exps.prototype.AngleAt = function (ret, index)
-	{
-		index = Math.floor(index);
-		if (index < 0 || index >= this.touches.length)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var t = this.touches[index];
-		ret.set_float(cr.to_degrees(cr.angleTo(t.lastx, t.lasty, t.x, t.y)));
-	};
-	Exps.prototype.AngleForID = function (ret, id)
-	{
-		var index = this.findTouch(id);
-		if (index < 0)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var touch = this.touches[index];
-		ret.set_float(cr.to_degrees(cr.angleTo(touch.lastx, touch.lasty, touch.x, touch.y)));
-	};
-	Exps.prototype.Alpha = function (ret)
-	{
-		ret.set_float(this.getAlpha());
-	};
-	Exps.prototype.Beta = function (ret)
-	{
-		ret.set_float(this.getBeta());
-	};
-	Exps.prototype.Gamma = function (ret)
-	{
-		ret.set_float(this.getGamma());
-	};
-	Exps.prototype.AccelerationXWithG = function (ret)
-	{
-		ret.set_float(this.acc_g_x);
-	};
-	Exps.prototype.AccelerationYWithG = function (ret)
-	{
-		ret.set_float(this.acc_g_y);
-	};
-	Exps.prototype.AccelerationZWithG = function (ret)
-	{
-		ret.set_float(this.acc_g_z);
-	};
-	Exps.prototype.AccelerationX = function (ret)
-	{
-		ret.set_float(this.acc_x);
-	};
-	Exps.prototype.AccelerationY = function (ret)
-	{
-		ret.set_float(this.acc_y);
-	};
-	Exps.prototype.AccelerationZ = function (ret)
-	{
-		ret.set_float(this.acc_z);
-	};
-	Exps.prototype.TouchIndex = function (ret)
-	{
-		ret.set_int(this.trigger_index);
-	};
-	Exps.prototype.TouchID = function (ret)
-	{
-		ret.set_float(this.trigger_id);
-	};
-	Exps.prototype.WidthForID = function (ret, id)
-	{
-		var index = this.findTouch(id);
-		if (index < 0)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var touch = this.touches[index];
-		ret.set_float(touch.width);
-	};
-	Exps.prototype.HeightForID = function (ret, id)
-	{
-		var index = this.findTouch(id);
-		if (index < 0)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var touch = this.touches[index];
-		ret.set_float(touch.height);
-	};
-	Exps.prototype.PressureForID = function (ret, id)
-	{
-		var index = this.findTouch(id);
-		if (index < 0)
-		{
-			ret.set_float(0);
-			return;
-		}
-		var touch = this.touches[index];
-		ret.set_float(touch.pressure);
 	};
 	pluginProto.exps = new Exps();
 }());
@@ -23755,557 +25075,577 @@ cr.plugins_.WebStorage = function(runtime)
 }());
 ;
 ;
-cr.plugins_.video = function(runtime)
+cr.plugins_.gamepad = function(runtime)
 {
 	this.runtime = runtime;
 };
 (function ()
 {
-	var pluginProto = cr.plugins_.video.prototype;
+	var pluginProto = cr.plugins_.gamepad.prototype;
+	var isSupported = false;
 	pluginProto.Type = function(plugin)
 	{
 		this.plugin = plugin;
 		this.runtime = plugin.runtime;
+		isSupported = !!(navigator["getGamepads"] || navigator["webkitGetGamepads"] || navigator["mozGetGamepads"] || navigator["gamepads"] || navigator["webkitGamepads"] || navigator["MozGamepads"] || window["cr_getGamepads"]);
 	};
 	var typeProto = pluginProto.Type.prototype;
 	typeProto.onCreate = function()
 	{
 	};
-	typeProto.onLostWebGLContext = function ()
+	var gamepadRuntime = null;
+	var gamepadInstance = null;
+	var controllers = new Array(16);
+	var padStates = new Array(16);
+	var padOldStates = new Array(16);
+	var osToken = "";
+	var browserToken = "";
+	function getPadState(i)
 	{
-		if (this.is_family)
-			return;
-		var i, len, inst;
-		for (i = 0, len = this.instances.length; i < len; ++i)
+		var j;
+		if (!padStates[i])
 		{
-			inst = this.instances[i];
-			inst.webGL_texture = null;		// will lazy create again on next draw
+			padStates[i] = new Array(20);
+			for (j = 0; j < 20; ++j)
+				padStates[i][j] = 0;
+		}
+		return padStates[i];
+	};
+	function getPadOldState(i)
+	{
+		var j;
+		if (!padOldStates[i])
+		{
+			padOldStates[i] = new Array(20);
+			for (j = 0; j < 20; ++j)
+				padOldStates[i][j] = 0;
+		}
+		return padOldStates[i];
+	};
+	function updatePadOldState(i)
+	{
+		var cur = getPadState(i);
+		var old = getPadOldState(i);
+		var j;
+		for (j = 0; j < 20; ++j)
+			old[j] = cur[j];
+	};
+	function clearPadState(i)
+	{
+		padStates[i] = null;
+		padOldStates[i] = null;
+	};
+	var axisOffset = 16;
+	var curCtrlMap = null;
+	var ctrlmap = {};
+	ctrlmap["windows"] = {};
+	ctrlmap["windows"]["firefox"] = {};
+	function doControllerMapping(index, isAxis, buttonmap, axismap)
+	{
+		if (isAxis)
+		{
+			if (index >= axismap.length)
+				return -1;			// unknown axis
+			if (cr.is_number(axismap[index]))
+				return axismap[index] + axisOffset;
+			else
+			{
+				return axismap[index];	// returning array
+			}
+		}
+		else
+		{
+			if (index >= buttonmap.length)
+				return -1;			// unknown button
+			return buttonmap[index];
 		}
 	};
-	var tmpVideo = document.createElement("video");
-	var can_play_webm = !!tmpVideo.canPlayType("video/webm");
-	var can_play_ogv = !!tmpVideo.canPlayType("video/ogg");
-	var can_play_mp4 = !!tmpVideo.canPlayType("video/mp4");
-	tmpVideo = null;
-	function isVideoPlaying(v)
+	var win_ff_xbox360_buttons = [0, 1, 2, 3, 4, 5, 8, 9, 10, 11];
+	var win_ff_xbox360_axes    = [0, 1, [7, 6], 2, 3, [14, 15], [12, 13]];
+	ctrlmap["windows"]["firefox"]["xbox360"] = function (index, isAxis)
 	{
-		return v && !v.paused && !v.ended && v.currentTime > 0;
+		return doControllerMapping(index, isAxis, win_ff_xbox360_buttons, win_ff_xbox360_axes);
+	};
+	var win_ff_lda_buttons = [2, 0, 1, 3, 4, 6, 5, 7, 8, 9];
+	var win_ff_lda_axes    = [0, 1, 2, 3, [14, 15], [12, 13]];
+	ctrlmap["windows"]["firefox"]["logitechdualaction"] = function (index, isAxis)
+	{
+		return doControllerMapping(index, isAxis, win_ff_lda_buttons, win_ff_lda_axes);
+	};
+	function defaultMap(index, isAxis)
+	{
+		if (isAxis)
+		{
+			if (index >= 4)
+				return -1;		// unknown axis
+			return index + axisOffset;
+		}
+		else
+		{
+			if (index >= 16)
+				return -1;		// unknown button
+			return index;
+		}
+	};
+	function getMapper(id_)
+	{
+		if (!curCtrlMap)
+			return defaultMap;
+		var controllertoken = "";
+		var id = id_.toLowerCase();
+		if (id.indexOf("xbox 360") > -1)
+			controllertoken = "xbox360";
+		else if (id.indexOf("logitech dual action") > -1)
+			controllertoken = "logitechdualaction";
+		var curmap = curCtrlMap[controllertoken];
+		return curmap || defaultMap;
+	};
+	function onConnected(e)
+	{
+		controllers[e["gamepad"]["index"]] = e["gamepad"];
+		gamepadRuntime.trigger(cr.plugins_.gamepad.prototype.cnds.OnGamepadConnected, gamepadInstance);
+	};
+	function onDisconnected(e)
+	{
+		gamepadRuntime.trigger(cr.plugins_.gamepad.prototype.cnds.OnGamepadDisconnected, gamepadInstance);
+		controllers[e["gamepad"]["index"]] = null;
 	};
 	pluginProto.Instance = function(type)
 	{
 		this.type = type;
 		this.runtime = type.runtime;
+		gamepadRuntime = this.runtime;
+		gamepadInstance = this;
 	};
 	var instanceProto = pluginProto.Instance.prototype;
-	var playOnNextTouch = [];
-	document.addEventListener("touchend", function ()
-	{
-		var i, len;
-		for (i = 0, len = playOnNextTouch.length; i < len; ++i)
-		{
-			playOnNextTouch[i].play();
-		}
-		cr.clearArray(playOnNextTouch);
-	}, true);
-	instanceProto.queueVideoPlay = function (add)
-	{
-		if (!this.video)
-			return;
-		var i;
-		if (!add)
-		{
-			i = playOnNextTouch.indexOf(this.video);
-			if (i >= 0)
-				playOnNextTouch.splice(i, 1);
-			return;
-		}
-		if (this.useNextTouchWorkaround && !this.runtime.isInUserInputEvent)
-		{
-			i = playOnNextTouch.indexOf(this.video);
-			if (i === -1)
-				playOnNextTouch.push(this.video);
-		}
-		else	// otherwise can play right away
-			this.video.play();
-	};
 	instanceProto.onCreate = function()
 	{
-		this.webm_src = this.properties[0];
-		this.ogv_src = this.properties[1];
-		this.mp4_src = this.properties[2];
-		this.autoplay = this.properties[3];					// 0 = no, 1 = preload, 2 = yes
-		this.playInBackground = (this.properties[4] !== 0);	// 0 = no, 1 = yes
-		this.videoWasPlayingOnSuspend = false;
-		this.video = document.createElement("video");
-		this.video.crossOrigin = "anonymous";
-		this.webGL_texture = null;
-		this.currentTrigger = -1;
-		this.viaCanvas = null;
-		this.viaCtx = null;
-		this.useViaCanvasWorkaround = this.runtime.isIE || this.runtime.isMicrosoftEdge;
-		var self = this;
-		this.video.addEventListener("canplay", function () {
-			self.currentTrigger = 0;
-			self.runtime.trigger(cr.plugins_.video.prototype.cnds.OnPlaybackEvent, self);
-		});
-		this.video.addEventListener("canplaythrough", function () {
-			self.currentTrigger = 1;
-			self.runtime.trigger(cr.plugins_.video.prototype.cnds.OnPlaybackEvent, self);
-		});
-		this.video.addEventListener("ended", function () {
-			self.currentTrigger = 2;
-			self.runtime.trigger(cr.plugins_.video.prototype.cnds.OnPlaybackEvent, self);
-		});
-		this.video.addEventListener("error", function () {
-			self.currentTrigger = 3;
-			self.runtime.trigger(cr.plugins_.video.prototype.cnds.OnPlaybackEvent, self);
-		});
-		this.video.addEventListener("loadstart", function () {
-			self.currentTrigger = 4;
-			self.runtime.trigger(cr.plugins_.video.prototype.cnds.OnPlaybackEvent, self);
-		});
-		this.video.addEventListener("playing", function () {
-			self.currentTrigger = 5;
-			self.runtime.trigger(cr.plugins_.video.prototype.cnds.OnPlaybackEvent, self);
-		});
-		this.video.addEventListener("pause", function () {
-			self.currentTrigger = 6;
-			self.runtime.trigger(cr.plugins_.video.prototype.cnds.OnPlaybackEvent, self);
-		});
-		this.video.addEventListener("stalled", function () {
-			self.currentTrigger = 7;
-			self.runtime.trigger(cr.plugins_.video.prototype.cnds.OnPlaybackEvent, self);
-		});
-		this.useNextTouchWorkaround = ((this.runtime.isiOS || (this.runtime.isAndroid && (this.runtime.isChrome || this.runtime.isAndroidStockBrowser))) && !this.runtime.isCrosswalk && !this.runtime.isDomFree);
-		if (this.autoplay === 0)
-		{
-			this.video.autoplay = false;
-			this.video.preload = "none";
-		}
-		else if (this.autoplay === 1)
-		{
-			this.video.autoplay = false;
-			this.video.preload = "auto";
-		}
-		else if (this.autoplay === 2)
-		{
-			this.video.autoplay = true;
-			if (this.useNextTouchWorkaround)
-				this.queueVideoPlay(true);
-		}
-		this.setSource(this.webm_src, this.ogv_src, this.mp4_src);
-		this.useDom = (((this.runtime.isSafari || this.runtime.isWKWebView) && this.runtime.isiOS) && !this.runtime.isDomFree);
-		this.element_hidden = false;
-		if (this.useDom)
-		{
-			jQuery(this.video).appendTo(this.runtime.canvasdiv ? this.runtime.canvasdiv : "body");
-			this.video.addEventListener("contextmenu", function (e) { e.preventDefault(); e.stopPropagation(); return false; }, false);
-			if (this.video.hasAttribute("controls"))
-				this.video.removeAttribute("controls")
-			this.video.setAttribute("webkit-playsinline", "");
-			if (this.properties[5] === 0)		// initially invisible
-			{
-				jQuery(this.video).hide();
-				this.visible = false;
-				this.element_hidden = true;
-			}
-		}
-		else
-		{
-			this.visible = (this.properties[5] !== 0);
-		}
-		this.lastLeft = 0;
-		this.lastTop = 0;
-		this.lastRight = 0;
-		this.lastBottom = 0;
-		this.lastWinWidth = 0;
-		this.lastWinHeight = 0;
-		if (this.useDom)
-			this.updatePosition(true);
+		this.deadzone = this.properties[0];
+		this.lastButton = 0;
+		var userAgent = navigator.userAgent;
+		osToken = "windows";
+		if (/mac/i.test(userAgent))
+			osToken = "mac";
+		curCtrlMap = ctrlmap[osToken];
+		browserToken = "chrome";
+		if (/firefox/i.test(userAgent))
+			browserToken = "firefox";
+		if (curCtrlMap)
+			curCtrlMap = curCtrlMap[browserToken];
+		window.addEventListener("webkitgamepadconnected", onConnected, false);
+		window.addEventListener("webkitgamepaddisconnected", onDisconnected, false);
+		window.addEventListener("MozGamepadConnected", onConnected, false);
+		window.addEventListener("MozGamepadDisconnected", onDisconnected, false);
+		window.addEventListener("gamepadconnected", onConnected, false);
+		window.addEventListener("gamepaddisconnected", onDisconnected, false);
 		this.runtime.tickMe(this);
-		if (!this.recycled)
-		{
-			var self = this;
-			this.runtime.addSuspendCallback(function(s)
-			{
-				self.onSuspend(s);
-			});
-		}
-	};
-	instanceProto.onSuspend = function (s)
-	{
-		if (this.playInBackground || !this.video)
-			return;
-		if (s)
-		{
-			if (isVideoPlaying(this.video))
-			{
-				this.queueVideoPlay(false);
-				this.video.pause();
-				this.videoWasPlayingOnSuspend = true;
-			}
-		}
-		else
-		{
-			if (this.videoWasPlayingOnSuspend)
-			{
-				this.queueVideoPlay(true);
-				this.videoWasPlayingOnSuspend = false;
-			}
-		}
-	};
-	instanceProto.setSource = function (webm_src, ogv_src, mp4_src)
-	{
-		var useSrc = "";
-		if (can_play_webm && webm_src)
-			useSrc = webm_src;
-		else if (can_play_ogv && ogv_src)
-			useSrc = ogv_src;
-		else if (can_play_mp4 && mp4_src)
-			useSrc = mp4_src;
-		if (this.runtime.isWKWebView)
-		{
-			useSrc = this.runtime.httpServerUrl + useSrc;
-		}
-		this.video.src = useSrc;
-		if (this.runtime.glwrap && this.webGL_texture)
-		{
-			this.runtime.glwrap.deleteTexture(this.webGL_texture);
-			this.webGL_texture = null;
-		}
-		this.viaCanvas = null;
-		this.viaCtx = null;
-	};
-	instanceProto.onDestroy = function ()
-	{
-		this.queueVideoPlay(false);
-		if (isVideoPlaying(this.video))
-			this.video.pause();		// stop playback
-		if (this.runtime.glwrap && this.webGL_texture)
-		{
-			this.runtime.glwrap.deleteTexture(this.webGL_texture);
-			this.webGL_texture = null;
-		}
-		if (this.useDom)
-			jQuery(this.video).remove();
-		this.viaCanvas = null;
-		this.viaCtx = null;
-		this.video = null;
+		this.activeControllers = [];
 	};
 	instanceProto.tick = function ()
 	{
-		if (isVideoPlaying(this.video) && !this.useDom)
-			this.runtime.redraw = true;
-		if (this.useDom)
-			this.updatePosition();
-	};
-	instanceProto.updatePosition = function (first)
-	{
-		if (this.runtime.isDomFree || !this.useDom)
-			return;
-		var videoWidth = this.video.videoWidth;
-		var videoHeight = this.video.videoHeight;
-		if (videoWidth <= 0)
-			videoWidth = 320;
-		if (videoHeight <= 0)
-			videoHeight = 240;
-		var videoAspect = videoWidth / videoHeight;
-		var dispWidth = this.width;
-		var dispHeight = this.height;
-		var dispAspect = dispWidth / dispHeight;
-		var offx = 0;
-		var offy = 0;
-		var drawWidth = 0;
-		var drawHeight = 0;
-		if (dispAspect > videoAspect)
+		this.activeControllers.length = 0;
+		var gamepads = null;
+		var synthetic = false;
+		if (navigator["getGamepads"])
+			gamepads = navigator["getGamepads"]();
+		else if (navigator["webkitGetGamepads"])
+			gamepads = navigator["webkitGetGamepads"]();
+		else if (navigator["mozGetGamepads"])
+			gamepads = navigator["mozGetGamepads"]();
+		else if (navigator["msGetGamepads"])
+			gamepads = navigator["msGetGamepads"]();
+		else if (this.runtime.isWindows8Capable && window["cr_getGamepads"])
 		{
-			drawWidth = dispHeight * videoAspect;
-			drawHeight = dispHeight;
-			offx = Math.floor((dispWidth - drawWidth) / 2);
-			if (offx < 0)
-				offx = 0;
+			gamepads = window["cr_getGamepads"]();
+			synthetic = true;
 		}
 		else
-		{
-			drawWidth = dispWidth;
-			drawHeight = dispWidth / videoAspect;
-			offy = Math.floor((dispHeight - drawHeight) / 2);
-			if (offy < 0)
-				offy = 0;
-		}
-		var ax = this.x + offx;
-		var ay = this.y + offy;
-		var left = this.layer.layerToCanvas(ax, ay, true);
-		var top = this.layer.layerToCanvas(ax, ay, false);
-		var right = this.layer.layerToCanvas(ax + drawWidth, ay + drawHeight, true);
-		var bottom = this.layer.layerToCanvas(ax + drawWidth, ay + drawHeight, false);
-		if (!this.visible || !this.layer.visible || right <= 0 || bottom <= 0 || left >= this.runtime.width || top >= this.runtime.height)
-		{
-			if (!this.element_hidden)
-				jQuery(this.video).hide();
-			this.element_hidden = true;
+			gamepads = navigator["gamepads"] || navigator["webkitGamepads"] || navigator["MozGamepads"] || controllers;
+		if (!gamepads)
 			return;
-		}
-		if (left < 1)
-			left = 1;
-		if (top < 1)
-			top = 1;
-		if (right >= this.runtime.width)
-			right = this.runtime.width - 1;
-		if (bottom >= this.runtime.height)
-			bottom = this.runtime.height - 1;
-		var curWinWidth = window.innerWidth;
-		var curWinHeight = window.innerHeight;
-		if (!first && this.lastLeft === left && this.lastTop === top && this.lastRight === right && this.lastBottom === bottom && this.lastWinWidth === curWinWidth && this.lastWinHeight === curWinHeight)
+		var i, len, j, lenj, mapfunc, index, value;
+		for (i = 0, len = gamepads.length; i < len; i++)
 		{
-			if (this.element_hidden)
+			var pad = gamepads[i];
+			if (!pad)
 			{
-				jQuery(this.video).show();
-				this.element_hidden = false;
+				clearPadState(i);
+				continue;
 			}
-			if (!this.runtime.isiOS || this.runtime.tickcount % 30 !== 0)
-				return;
+			var state = getPadState(i);
+			var oldstate = getPadOldState(i);
+			updatePadOldState(i);
+			mapfunc = (synthetic ? defaultMap : getMapper(pad.id));
+			for (j = 0, lenj = pad["buttons"].length; j < lenj; j++)
+			{
+				if (typeof pad["buttons"][j]["value"] !== "undefined")
+					value = pad["buttons"][j]["value"];
+				else
+					value = pad["buttons"][j];
+				index = mapfunc(j, false, value);
+				if (index >= 0 && index < 20)
+				{
+					state[index] = value * 100;
+					if (state[index] >= 50 && oldstate[index] < 50)
+						this.lastButton = index;
+				}
+			}
+			for (j = 0, lenj = pad["axes"].length; j < lenj; j++)
+			{
+				value = pad["axes"][j];
+				index = mapfunc(j, true, value);
+				if (cr.is_number(index))
+				{
+					if (index >= 0 && index < 20)
+						state[index] = value * 100;
+				}
+				else
+				{
+					state[index[0]] = 0;
+					state[index[1]] = 0;
+					if (value <= 0)
+						state[index[0]] = Math.abs(value * 100);
+					else
+						state[index[1]] = Math.abs(value * 100);
+				}
+			}
+			this.activeControllers.push(pad);
 		}
-		this.lastLeft = left;
-		this.lastTop = top;
-		this.lastRight = right;
-		this.lastBottom = bottom;
-		this.lastWinWidth = curWinWidth;
-		this.lastWinHeight = curWinHeight;
-		if (this.element_hidden)
-		{
-			jQuery(this.video).show();
-			this.element_hidden = false;
-		}
-		var offx = Math.round(left) + jQuery(this.runtime.canvas).offset().left;
-		var offy = Math.round(top) + jQuery(this.runtime.canvas).offset().top;
-		jQuery(this.video).css("position", "absolute");
-		jQuery(this.video).offset({left: offx, top: offy});
-		jQuery(this.video).width(Math.round(right - left));
-		jQuery(this.video).height(Math.round(bottom - top));
+		for ( ; i < 20; ++i)
+			clearPadState(i);
 	};
 	instanceProto.saveToJSON = function ()
 	{
-		return {
-			"s": (this.video.src || ""),
-			"p": !!isVideoPlaying(this.video),
-			"t": (this.video.currentTime || 0)
-		};
+		return { "lastButton": this.lastButton };
 	};
 	instanceProto.loadFromJSON = function (o)
 	{
-		if (!o || typeof o["s"] === "undefined")
-			return;
-		var src = o["s"];
-		this.setSource(src, src, src);
-		try {
-			this.video.currentTime = o["t"];
-		}
-		catch (e) {};		// ignore if throws
-		if (o["p"])			// is playing
-		{
-			this.queueVideoPlay(true);
-		}
-		else
-		{
-			this.queueVideoPlay(false);
-			this.video.pause();
-		}
-	};
-	instanceProto.draw = function (ctx)
-	{
-		if (!this.video || this.useDom)
-			return;		// no video to draw or using off-canvas DOM element
-		var videoWidth = this.video.videoWidth;
-		var videoHeight = this.video.videoHeight;
-		if (videoWidth <= 0 || videoHeight <= 0)
-			return;		// not yet loaded metadata
-		var videoAspect = videoWidth / videoHeight;
-		var dispWidth = this.width;
-		var dispHeight = this.height;
-		var dispAspect = dispWidth / dispHeight;
-		var offx = 0;
-		var offy = 0;
-		var drawWidth = 0;
-		var drawHeight = 0;
-		if (dispAspect > videoAspect)
-		{
-			drawWidth = dispHeight * videoAspect;
-			drawHeight = dispHeight;
-			offx = Math.floor((dispWidth - drawWidth) / 2);
-			if (offx < 0)
-				offx = 0;
-		}
-		else
-		{
-			drawWidth = dispWidth;
-			drawHeight = dispWidth / videoAspect;
-			offy = Math.floor((dispHeight - drawHeight) / 2);
-			if (offy < 0)
-				offy = 0;
-		}
-		ctx.globalAlpha = this.opacity;
-		ctx.drawImage(this.video, this.x + offx, this.y + offy, drawWidth, drawHeight);
-	};
-	var tmpRect = new cr.rect(0, 0, 0, 0);
-	var tmpQuad = new cr.quad();
-	instanceProto.drawGL = function (glw)
-	{
-		if (!this.video || this.useDom)
-			return;		// no video to draw or using off-canvas DOM element
-		var videoWidth = this.video.videoWidth;
-		var videoHeight = this.video.videoHeight;
-		if (videoWidth <= 0 || videoHeight <= 0)
-			return;		// not yet loaded metadata
-		var videoAspect = videoWidth / videoHeight;
-		var dispWidth = this.width;
-		var dispHeight = this.height;
-		var dispAspect = dispWidth / dispHeight;
-		var offx = 0;
-		var offy = 0;
-		var drawWidth = 0;
-		var drawHeight = 0;
-		if (dispAspect > videoAspect)
-		{
-			drawWidth = dispHeight * videoAspect;
-			drawHeight = dispHeight;
-			offx = Math.floor((dispWidth - drawWidth) / 2);
-			if (offx < 0)
-				offx = 0;
-		}
-		else
-		{
-			drawWidth = dispWidth;
-			drawHeight = dispWidth / videoAspect;
-			offy = Math.floor((dispHeight - drawHeight) / 2);
-			if (offy < 0)
-				offy = 0;
-		}
-		if (!this.webGL_texture)
-		{
-			this.webGL_texture = glw.createEmptyTexture(videoWidth, videoHeight, this.runtime.linearSampling, false, false);
-		}
-		if (this.useViaCanvasWorkaround)
-		{
-			if (!this.viaCtx)
-			{
-				this.viaCanvas = document.createElement("canvas");
-				this.viaCanvas.width = videoWidth;
-				this.viaCanvas.height = videoHeight;
-				this.viaCtx = this.viaCanvas.getContext("2d");
-			}
-			this.viaCtx.drawImage(this.video, 0, 0);
-			glw.videoToTexture(this.viaCanvas, this.webGL_texture);
-		}
-		else
-		{
-			glw.videoToTexture(this.video, this.webGL_texture);
-		}
-		glw.setBlend(this.srcBlend, this.destBlend);
-		glw.setOpacity(this.opacity);
-		glw.setTexture(this.webGL_texture);
-		tmpRect.set(this.x + offx, this.y + offy, this.x + offx + drawWidth, this.y + offy + drawHeight);
-		tmpQuad.set_from_rect(tmpRect);
-		glw.quad(tmpQuad.tlx, tmpQuad.tly, tmpQuad.trx, tmpQuad.try_, tmpQuad.brx, tmpQuad.bry, tmpQuad.blx, tmpQuad.bly);
-	};
-	function dbToLinear_nocap(x)
-	{
-		return Math.pow(10, x / 20);
-	};
-	function linearToDb_nocap(x)
-	{
-		return (Math.log(x) / Math.log(10)) * 20;
-	};
-	function dbToLinear(x)
-	{
-		var v = dbToLinear_nocap(x);
-		if (v < 0)
-			v = 0;
-		if (v > 1)
-			v = 1;
-		return v;
-	};
-	function linearToDb(x)
-	{
-		if (x < 0)
-			x = 0;
-		if (x > 1)
-			x = 1;
-		return linearToDb_nocap(x);
+		this.lastButton = o["lastButton"];
 	};
 	function Cnds() {};
-	Cnds.prototype.IsPlaying = function ()
+	Cnds.prototype.SupportsGamepad = function ()
 	{
-		return isVideoPlaying(this.video);
+		return isSupported;
 	};
-	Cnds.prototype.IsPaused = function ()
+	Cnds.prototype.OnGamepadConnected = function ()
 	{
-		return this.video.paused;
+		return true;
 	};
-	Cnds.prototype.HasEnded = function ()
+	Cnds.prototype.OnGamepadDisconnected = function ()
 	{
-		return this.video.ended;
+		return true;
 	};
-	Cnds.prototype.IsMuted = function ()
+	Cnds.prototype.IsButtonDown = function (gamepad, button)
 	{
-		return this.video.muted;
+		gamepad = Math.floor(gamepad);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+			return false;
+		var state = getPadState(gamepad);
+		if (!state)
+			return false;
+		var ret = state[button] >= 50;
+		if (ret)
+			this.lastButton = button;
+		return ret;
 	};
-	Cnds.prototype.OnPlaybackEvent = function (trig)
+	Cnds.prototype.OnButtonDown = function (gamepad, button)
 	{
-		return this.currentTrigger === trig;
+		gamepad = Math.floor(gamepad);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+			return false;
+		var state = getPadState(gamepad);
+		var oldstate = getPadOldState(gamepad);
+		if (!state || !oldstate)
+			return false;
+		var ret = state[button] >= 50 && oldstate[button] < 50;
+		if (ret)
+			this.lastButton = button;
+		return ret;
+	};
+	Cnds.prototype.OnButtonUp = function (gamepad, button)
+	{
+		gamepad = Math.floor(gamepad);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+			return false;
+		var state = getPadState(gamepad);
+		var oldstate = getPadOldState(gamepad);
+		if (!state || !oldstate)
+			return false;
+		var ret = state[button] < 50 && oldstate[button] >= 50;
+		if (ret)
+			this.lastButton = button;
+		return ret;
+	};
+	Cnds.prototype.HasGamepads = function ()
+	{
+		return this.activeControllers.length > 0;
+	};
+	Cnds.prototype.CompareAxis = function (gamepad, axis, comparison, value)
+	{
+		gamepad = Math.floor(gamepad);
+		axis = Math.floor(axis);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+			return false;
+		var state = getPadState(gamepad);
+		if (!state)
+			return;
+		var axisvalue = state[axis + axisOffset];
+		var othervalue = 0;
+		if (axis % 2 === 0)										// is X axis
+			othervalue = state[axis + axisOffset + 1];	// get next axis (Y)
+		else
+			othervalue = state[axis + axisOffset - 1];	// get previous axis (X)
+		if (Math.sqrt(axisvalue * axisvalue + othervalue * othervalue) <= this.deadzone)
+			axisvalue = 0;
+		return cr.do_cmp(axisvalue, comparison, value);
+	};
+	Cnds.prototype.OnAnyButtonDown = function (gamepad)
+	{
+		gamepad = Math.floor(gamepad);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+			return false;
+		var state = getPadState(gamepad);
+		var oldstate = getPadOldState(gamepad);
+		if (!state || !oldstate)
+			return false;
+		var i, len;
+		for (i = 0, len = state.length; i < len; i++)
+		{
+			if (state[i] >= 50 && oldstate[i] < 50)
+			{
+				this.lastButton = i;
+				return true;
+			}
+		}
+		return false;
+	};
+	Cnds.prototype.OnAnyButtonUp = function (gamepad)
+	{
+		gamepad = Math.floor(gamepad);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+			return false;
+		var state = getPadState(gamepad);
+		var oldstate = getPadOldState(gamepad);
+		if (!state || !oldstate)
+			return false;
+		var i, len;
+		for (i = 0, len = state.length; i < len; i++)
+		{
+			if (state[i] < 50 && oldstate[i] >= 50)
+			{
+				this.lastButton = i;
+				return true;
+			}
+		}
+		return false;
+	};
+	Cnds.prototype.IsButtonIndexDown = function (gamepad, button)
+	{
+		gamepad = Math.floor(gamepad);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+			return false;
+		var state = getPadState(gamepad);
+		if (!state)
+			return false;
+		button = Math.floor(button);
+		if (button < 0 || button >= state.length)
+			return false;
+		var ret = state[button] >= 50;
+		if (ret)
+			this.lastButton = button;
+		return ret;
+	};
+	Cnds.prototype.OnButtonIndexDown = function (gamepad, button)
+	{
+		gamepad = Math.floor(gamepad);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+			return false;
+		var state = getPadState(gamepad);
+		var oldstate = getPadOldState(gamepad);
+		if (!state || !oldstate)
+			return false;
+		button = Math.floor(button);
+		if (button < 0 || button >= state.length)
+			return false;
+		var ret = state[button] >= 50 && oldstate[button] < 50;
+		if (ret)
+			this.lastButton = button;
+		return ret;
+	};
+	Cnds.prototype.OnButtonIndexUp = function (gamepad, button)
+	{
+		gamepad = Math.floor(gamepad);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+			return false;
+		var state = getPadState(gamepad);
+		var oldstate = getPadOldState(gamepad);
+		if (!state || !oldstate)
+			return false;
+		button = Math.floor(button);
+		if (button < 0 || button >= state.length)
+			return false;
+		var ret = state[button] < 50 && oldstate[button] >= 50;
+		if (ret)
+			this.lastButton = button;
+		return ret;
 	};
 	pluginProto.cnds = new Cnds();
 	function Acts() {};
-	Acts.prototype.SetSource = function (webm_src, ogv_src, mp4_src)
-	{
-		this.setSource(webm_src, ogv_src, mp4_src);
-		this.video.load();
-	};
-	Acts.prototype.SetPlaybackTime = function (s)
-	{
-		try {
-			this.video.currentTime = s;
-		}
-		catch (e)
-		{
-			if (console && console.error)
-				console.error("Exception setting video playback time: ", e);
-		}
-	};
-	Acts.prototype.SetLooping = function (l)
-	{
-		this.video.loop = (l !== 0);
-	};
-	Acts.prototype.SetMuted = function (m)
-	{
-		this.video.muted = (m !== 0);
-	};
-	Acts.prototype.SetVolume = function (v)
-	{
-		this.video.volume = dbToLinear(v);
-	};
-	Acts.prototype.Pause = function ()
-	{
-		this.queueVideoPlay(false);		// remove any play-on-next-touch queue, since we don't want it to be playing any more
-		this.video.pause();
-	};
-	Acts.prototype.Play = function ()
-	{
-		this.queueVideoPlay(true);
-	};
 	pluginProto.acts = new Acts();
 	function Exps() {};
-	Exps.prototype.PlaybackTime = function (ret)
+	Exps.prototype.GamepadCount = function (ret)
 	{
-		ret.set_float(this.video.currentTime || 0);
+		ret.set_int(this.activeControllers.length);
 	};
-	Exps.prototype.Duration = function (ret)
+	Exps.prototype.GamepadID = function (ret, index)
 	{
-		ret.set_float(this.video.duration || 0);
+		if (index < 0 || index >= this.activeControllers.length)
+		{
+			ret.set_string("");
+			return;
+		}
+		ret.set_string(this.activeControllers[index].id);
 	};
-	Exps.prototype.Volume = function (ret)
+	Exps.prototype.GamepadAxes = function (ret, index)
 	{
-		ret.set_float(linearToDb(this.video.volume || 0));
+		if (index < 0 || index >= this.activeControllers.length)
+		{
+			ret.set_string("");
+			return;
+		}
+		var axes = this.activeControllers[index]["axes"];
+		var str = "";
+		var i, len;
+		for (i = 0, len = axes.length; i < len; i++)
+		{
+			str += "Axis " + i + ": " + Math.round(axes[i] * 100) + "\n";
+		}
+		ret.set_string(str);
+	};
+	Exps.prototype.GamepadButtons = function (ret, index)
+	{
+		if (index < 0 || index >= this.activeControllers.length)
+		{
+			ret.set_string("");
+			return;
+		}
+		var buttons = this.activeControllers[index]["buttons"];
+		var str = "";
+		var i, len, value;
+		for (i = 0, len = buttons.length; i < len; i++)
+		{
+			if (typeof buttons[i]["value"] !== "undefined")
+				value = buttons[i]["value"];
+			else
+				value = buttons[i];
+			str += "Button " + i + ": " + Math.round(value * 100) + "\n";
+		}
+		ret.set_string(str);
+	};
+	Exps.prototype.RawButton = function (ret, gamepad, index)
+	{
+		gamepad = Math.floor(gamepad);
+		index = Math.floor(index);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var state = this.activeControllers[gamepad]["buttons"];
+		if (!state || index < 0 || index >= state.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		if (typeof state[index]["value"] !== "undefined")
+			ret.set_float(state[index]["value"]);
+		else
+			ret.set_float(state[index]);
+	};
+	Exps.prototype.RawAxis = function (ret, gamepad, index)
+	{
+		gamepad = Math.floor(gamepad);
+		index = Math.floor(index);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var state = this.activeControllers[gamepad]["axes"];
+		if (!state || index < 0 || index >= state.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		ret.set_float(state[index]);
+	};
+	Exps.prototype.RawButtonCount = function (ret, gamepad)
+	{
+		gamepad = Math.floor(gamepad);
+		index = Math.floor(index);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+		{
+			ret.set_int(0);
+			return;
+		}
+		ret.set_int(this.activeControllers[gamepad]["buttons"].length);
+	};
+	Exps.prototype.RawAxisCount = function (ret, gamepad)
+	{
+		gamepad = Math.floor(gamepad);
+		index = Math.floor(index);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+		{
+			ret.set_int(0);
+			return;
+		}
+		ret.set_int(this.activeControllers[gamepad]["axes"].length);
+	};
+	Exps.prototype.Button = function (ret, gamepad, index)
+	{
+		gamepad = Math.floor(gamepad);
+		index = Math.floor(index);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var state = getPadState(gamepad);
+		if (!state || index < 0 || index >= axisOffset)
+		{
+			ret.set_float(0);
+			return;
+		}
+		ret.set_float(state[index]);
+	};
+	Exps.prototype.Axis = function (ret, gamepad, index)
+	{
+		gamepad = Math.floor(gamepad);
+		index = Math.floor(index);
+		if (gamepad < 0 || gamepad >= this.activeControllers.length)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var state = getPadState(gamepad);
+		if (!state || index < 0 || index >= 4)
+		{
+			ret.set_float(0);
+			return;
+		}
+		var value = state[index + axisOffset];
+		var othervalue = 0;
+		if (index % 2 === 0)								// is X axis
+			othervalue = state[index + axisOffset + 1];		// get next axis (Y)
+		else
+			othervalue = state[index + axisOffset - 1];		// get previous axis (X)
+		if (Math.sqrt(value * value + othervalue * othervalue) <= this.deadzone)
+			value = 0;
+		ret.set_float(value);
+	};
+	Exps.prototype.LastButton = function (ret)
+	{
+		ret.set_int(this.lastButton);
 	};
 	pluginProto.exps = new Exps();
 }());
@@ -24858,6 +26198,243 @@ cr.behaviors.Flash = function(runtime)
 }());
 ;
 ;
+cr.behaviors.LOS = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var behaviorProto = cr.behaviors.LOS.prototype;
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+	var behtypeProto = behaviorProto.Type.prototype;
+	behtypeProto.onCreate = function()
+	{
+		this.obstacleTypes = [];						// object types to check for as obstructions
+	};
+	behtypeProto.findLosBehavior = function (inst)
+	{
+		var i, len, b;
+		for (i = 0, len = inst.behavior_insts.length; i < len; ++i)
+		{
+			b = inst.behavior_insts[i];
+			if (b instanceof cr.behaviors.LOS.prototype.Instance && b.type === this)
+				return b;
+		}
+		return null;
+	};
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+	};
+	var behinstProto = behaviorProto.Instance.prototype;
+	behinstProto.onCreate = function()
+	{
+		this.obstacleMode = this.properties[0];		// 0 = solids, 1 = custom
+		this.range = this.properties[1];
+		this.cone = cr.to_radians(this.properties[2]);
+		this.useCollisionCells = (this.properties[3] !== 0);
+	};
+	behinstProto.onDestroy = function ()
+	{
+	};
+	behinstProto.saveToJSON = function ()
+	{
+		var o = {
+			"r": this.range,
+			"c": this.cone,
+			"t": []
+		};
+		var i, len;
+		for (i = 0, len = this.type.obstacleTypes.length; i < len; i++)
+		{
+			o["t"].push(this.type.obstacleTypes[i].sid);
+		}
+		return o;
+	};
+	behinstProto.loadFromJSON = function (o)
+	{
+		this.range = o["r"];
+		this.cone = o["c"];
+		cr.clearArray(this.type.obstacleTypes);
+		var i, len, t;
+		for (i = 0, len = o["t"].length; i < len; i++)
+		{
+			t = this.runtime.getObjectTypeBySid(o["t"][i]);
+			if (t)
+				this.type.obstacleTypes.push(t);
+		}
+	};
+	behinstProto.tick = function ()
+	{
+	};
+	var candidates = [];
+	var tmpRect = new cr.rect(0, 0, 0, 0);
+	behinstProto.hasLOSto = function (x_, y_)
+	{
+		var startx = this.inst.x;
+		var starty = this.inst.y;
+		var myangle = this.inst.angle;
+		if (this.inst.width < 0)
+			myangle += Math.PI;
+		if (cr.distanceTo(startx, starty, x_, y_) > this.range)
+			return false;		// too far away
+		var a = cr.angleTo(startx, starty, x_, y_);
+		if (cr.angleDiff(myangle, a) > this.cone / 2)
+			return false;		// outside cone of view
+		var i, leni, rinst, solid;
+		tmpRect.set(startx, starty, x_, y_);
+		tmpRect.normalize();
+		if (this.obstacleMode === 0)
+		{
+			if (this.useCollisionCells)
+			{
+				this.runtime.getSolidCollisionCandidates(this.inst.layer, tmpRect, candidates);
+			}
+			else
+			{
+				solid = this.runtime.getSolidBehavior();
+				if (solid)
+					cr.appendArray(candidates, solid.my_instances.valuesRef());
+			}
+			for (i = 0, leni = candidates.length; i < leni; ++i)
+			{
+				rinst = candidates[i];
+				if (!rinst.extra["solidEnabled"] || rinst === this.inst)
+					continue;
+				if (this.runtime.testSegmentOverlap(startx, starty, x_, y_, rinst))
+				{
+					cr.clearArray(candidates);
+					return false;
+				}
+			}
+		}
+		else
+		{
+			if (this.useCollisionCells)
+			{
+				this.runtime.getTypesCollisionCandidates(this.inst.layer, this.type.obstacleTypes, tmpRect, candidates);
+			}
+			else
+			{
+				for (i = 0, leni = this.type.obstacleTypes.length; i < leni; ++i)
+				{
+					cr.appendArray(candidates, this.type.obstacleTypes[i].instances);
+				}
+			}
+			for (i = 0, leni = candidates.length; i < leni; ++i)
+			{
+				rinst = candidates[i];
+				if (rinst === this.inst)
+					continue;
+				if (this.runtime.testSegmentOverlap(startx, starty, x_, y_, rinst))
+				{
+					cr.clearArray(candidates);
+					return false;
+				}
+			}
+		}
+		cr.clearArray(candidates);
+		return true;
+	};
+	function Cnds() {};
+	var ltopick = new cr.ObjectSet();
+	var rtopick = new cr.ObjectSet();
+	Cnds.prototype.HasLOSToObject = function (obj_)
+	{
+		if (!obj_)
+			return false;
+		var i, j, leni, lenj, linst, losbeh, rinst, pick;
+		var lsol = this.runtime.getCurrentConditionObjectType().getCurrentSol();
+		var rsol = obj_.getCurrentSol();
+		var linstances = lsol.getObjects();
+		var rinstances = rsol.getObjects();
+		if (lsol.select_all)
+			cr.clearArray(lsol.else_instances);
+		if (rsol.select_all)
+			cr.clearArray(rsol.else_instances);
+		var inverted = this.runtime.getCurrentCondition().inverted;
+		for (i = 0, leni = linstances.length; i < leni; ++i)
+		{
+			linst = linstances[i];
+			pick = false;
+			losbeh = this.findLosBehavior(linst);
+;
+			for (j = 0, lenj = rinstances.length; j < lenj; ++j)
+			{
+				rinst = rinstances[j];
+				if (linst !== rinst && cr.xor(losbeh.hasLOSto(rinst.x, rinst.y), inverted))
+				{
+					pick = true;
+					rtopick.add(rinst);
+				}
+			}
+			if (pick)
+				ltopick.add(linst);
+		}
+		var lpicks = ltopick.valuesRef();
+		var rpicks = rtopick.valuesRef();
+		lsol.select_all = false;
+		rsol.select_all = false;
+		cr.shallowAssignArray(lsol.instances, lpicks);
+		cr.shallowAssignArray(rsol.instances, rpicks);
+		ltopick.clear();
+		rtopick.clear();
+		return lsol.hasObjects();
+	};
+	Cnds.prototype.HasLOSToPosition = function (x_, y_)
+	{
+		return this.hasLOSto(x_, y_);
+	};
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.SetRange = function (r)
+	{
+		this.range = r;
+	};
+	Acts.prototype.SetCone = function (c)
+	{
+		this.cone = cr.to_radians(c);
+	};
+	Acts.prototype.AddObstacle = function (obj_)
+	{
+		var obstacleTypes = this.type.obstacleTypes;
+		if (obstacleTypes.indexOf(obj_) !== -1)
+			return;
+		var i, len, t;
+		for (i = 0, len = obstacleTypes.length; i < len; i++)
+		{
+			t = obstacleTypes[i];
+			if (t.is_family && t.members.indexOf(obj_) !== -1)
+				return;
+		}
+		obstacleTypes.push(obj_);
+	};
+	Acts.prototype.ClearObstacles = function ()
+	{
+		cr.clearArray(this.type.obstacleTypes);
+	};
+	behaviorProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.Range = function (ret)
+	{
+		ret.set_float(this.range);
+	};
+	Exps.prototype.ConeOfView = function (ret)
+	{
+		ret.set_float(cr.to_degrees(this.cone));
+	};
+	behaviorProto.exps = new Exps();
+}());
+;
+;
 cr.behaviors.Pin = function(runtime)
 {
 	this.runtime = runtime;
@@ -25017,6 +26594,976 @@ cr.behaviors.Pin = function(runtime)
 	Exps.prototype.PinnedUID = function (ret)
 	{
 		ret.set_int(this.pinObject ? this.pinObject.uid : -1);
+	};
+	behaviorProto.exps = new Exps();
+}());
+;
+;
+cr.behaviors.Platform = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var behaviorProto = cr.behaviors.Platform.prototype;
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+	var behtypeProto = behaviorProto.Type.prototype;
+	behtypeProto.onCreate = function()
+	{
+	};
+	var ANIMMODE_STOPPED = 0;
+	var ANIMMODE_MOVING = 1;
+	var ANIMMODE_JUMPING = 2;
+	var ANIMMODE_FALLING = 3;
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+		this.leftkey = false;
+		this.rightkey = false;
+		this.jumpkey = false;
+		this.jumped = false;			// prevent bunnyhopping
+		this.doubleJumped = false;
+		this.canDoubleJump = false;
+		this.ignoreInput = false;
+		this.simleft = false;
+		this.simright = false;
+		this.simjump = false;
+		this.lastFloorObject = null;
+		this.loadFloorObject = -1;
+		this.lastFloorX = 0;
+		this.lastFloorY = 0;
+		this.floorIsJumpthru = false;
+		this.animMode = ANIMMODE_STOPPED;
+		this.fallthrough = 0;			// fall through jump-thru.  >0 to disable, lasts a few ticks
+		this.firstTick = true;
+		this.dx = 0;
+		this.dy = 0;
+	};
+	var behinstProto = behaviorProto.Instance.prototype;
+	behinstProto.updateGravity = function()
+	{
+		this.downx = Math.cos(this.ga);
+		this.downy = Math.sin(this.ga);
+		this.rightx = Math.cos(this.ga - Math.PI / 2);
+		this.righty = Math.sin(this.ga - Math.PI / 2);
+		this.downx = cr.round6dp(this.downx);
+		this.downy = cr.round6dp(this.downy);
+		this.rightx = cr.round6dp(this.rightx);
+		this.righty = cr.round6dp(this.righty);
+		this.g1 = this.g;
+		if (this.g < 0)
+		{
+			this.downx *= -1;
+			this.downy *= -1;
+			this.g = Math.abs(this.g);
+		}
+	};
+	behinstProto.onCreate = function()
+	{
+		this.maxspeed = this.properties[0];
+		this.acc = this.properties[1];
+		this.dec = this.properties[2];
+		this.jumpStrength = this.properties[3];
+		this.g = this.properties[4];
+		this.g1 = this.g;
+		this.maxFall = this.properties[5];
+		this.enableDoubleJump = (this.properties[6] !== 0);	// 0=disabled, 1=enabled
+		this.jumpSustain = (this.properties[7] / 1000);		// convert ms to s
+		this.defaultControls = (this.properties[8] === 1);	// 0=no, 1=yes
+		this.enabled = (this.properties[9] !== 0);
+		this.wasOnFloor = false;
+		this.wasOverJumpthru = this.runtime.testOverlapJumpThru(this.inst);
+		this.loadOverJumpthru = -1;
+		this.sustainTime = 0;				// time of jump sustain remaining
+		this.ga = cr.to_radians(90);
+		this.updateGravity();
+		var self = this;
+		if (this.defaultControls && !this.runtime.isDomFree)
+		{
+			jQuery(document).keydown(function(info) {
+						self.onKeyDown(info);
+					});
+			jQuery(document).keyup(function(info) {
+						self.onKeyUp(info);
+					});
+		}
+		if (!this.recycled)
+		{
+			this.myDestroyCallback = function(inst) {
+										self.onInstanceDestroyed(inst);
+									};
+		}
+		this.runtime.addDestroyCallback(this.myDestroyCallback);
+		this.inst.extra["isPlatformBehavior"] = true;
+	};
+	behinstProto.saveToJSON = function ()
+	{
+		return {
+			"ii": this.ignoreInput,
+			"lfx": this.lastFloorX,
+			"lfy": this.lastFloorY,
+			"lfo": (this.lastFloorObject ? this.lastFloorObject.uid : -1),
+			"am": this.animMode,
+			"en": this.enabled,
+			"fall": this.fallthrough,
+			"ft": this.firstTick,
+			"dx": this.dx,
+			"dy": this.dy,
+			"ms": this.maxspeed,
+			"acc": this.acc,
+			"dec": this.dec,
+			"js": this.jumpStrength,
+			"g": this.g,
+			"g1": this.g1,
+			"mf": this.maxFall,
+			"wof": this.wasOnFloor,
+			"woj": (this.wasOverJumpthru ? this.wasOverJumpthru.uid : -1),
+			"ga": this.ga,
+			"edj": this.enableDoubleJump,
+			"cdj": this.canDoubleJump,
+			"dj": this.doubleJumped,
+			"sus": this.jumpSustain
+		};
+	};
+	behinstProto.loadFromJSON = function (o)
+	{
+		this.ignoreInput = o["ii"];
+		this.lastFloorX = o["lfx"];
+		this.lastFloorY = o["lfy"];
+		this.loadFloorObject = o["lfo"];
+		this.animMode = o["am"];
+		this.enabled = o["en"];
+		this.fallthrough = o["fall"];
+		this.firstTick = o["ft"];
+		this.dx = o["dx"];
+		this.dy = o["dy"];
+		this.maxspeed = o["ms"];
+		this.acc = o["acc"];
+		this.dec = o["dec"];
+		this.jumpStrength = o["js"];
+		this.g = o["g"];
+		this.g1 = o["g1"];
+		this.maxFall = o["mf"];
+		this.wasOnFloor = o["wof"];
+		this.loadOverJumpthru = o["woj"];
+		this.ga = o["ga"];
+		this.enableDoubleJump = o["edj"];
+		this.canDoubleJump = o["cdj"];
+		this.doubleJumped = o["dj"];
+		this.jumpSustain = o["sus"];
+		this.leftkey = false;
+		this.rightkey = false;
+		this.jumpkey = false;
+		this.jumped = false;
+		this.simleft = false;
+		this.simright = false;
+		this.simjump = false;
+		this.sustainTime = 0;
+		this.updateGravity();
+	};
+	behinstProto.afterLoad = function ()
+	{
+		if (this.loadFloorObject === -1)
+			this.lastFloorObject = null;
+		else
+			this.lastFloorObject = this.runtime.getObjectByUID(this.loadFloorObject);
+		if (this.loadOverJumpthru === -1)
+			this.wasOverJumpthru = null;
+		else
+			this.wasOverJumpthru = this.runtime.getObjectByUID(this.loadOverJumpthru);
+	};
+	behinstProto.onInstanceDestroyed = function (inst)
+	{
+		if (this.lastFloorObject == inst)
+			this.lastFloorObject = null;
+	};
+	behinstProto.onDestroy = function ()
+	{
+		this.lastFloorObject = null;
+		this.runtime.removeDestroyCallback(this.myDestroyCallback);
+	};
+	behinstProto.onKeyDown = function (info)
+	{
+		switch (info.which) {
+		case 38:	// up
+			info.preventDefault();
+			this.jumpkey = true;
+			break;
+		case 37:	// left
+			info.preventDefault();
+			this.leftkey = true;
+			break;
+		case 39:	// right
+			info.preventDefault();
+			this.rightkey = true;
+			break;
+		}
+	};
+	behinstProto.onKeyUp = function (info)
+	{
+		switch (info.which) {
+		case 38:	// up
+			info.preventDefault();
+			this.jumpkey = false;
+			this.jumped = false;
+			break;
+		case 37:	// left
+			info.preventDefault();
+			this.leftkey = false;
+			break;
+		case 39:	// right
+			info.preventDefault();
+			this.rightkey = false;
+			break;
+		}
+	};
+	behinstProto.onWindowBlur = function ()
+	{
+		this.leftkey = false;
+		this.rightkey = false;
+		this.jumpkey = false;
+	};
+	behinstProto.getGDir = function ()
+	{
+		if (this.g < 0)
+			return -1;
+		else
+			return 1;
+	};
+	behinstProto.isOnFloor = function ()
+	{
+		var ret = null;
+		var ret2 = null;
+		var i, len, j;
+		var oldx = this.inst.x;
+		var oldy = this.inst.y;
+		this.inst.x += this.downx;
+		this.inst.y += this.downy;
+		this.inst.set_bbox_changed();
+		if (this.lastFloorObject && this.runtime.testOverlap(this.inst, this.lastFloorObject))
+		{
+			this.inst.x = oldx;
+			this.inst.y = oldy;
+			this.inst.set_bbox_changed();
+			return this.lastFloorObject;
+		}
+		else
+		{
+			ret = this.runtime.testOverlapSolid(this.inst);
+			if (!ret && this.fallthrough === 0)
+				ret2 = this.runtime.testOverlapJumpThru(this.inst, true);
+			this.inst.x = oldx;
+			this.inst.y = oldy;
+			this.inst.set_bbox_changed();
+			if (ret)		// was overlapping solid
+			{
+				if (this.runtime.testOverlap(this.inst, ret))
+					return null;
+				else
+				{
+					this.floorIsJumpthru = false;
+					return ret;
+				}
+			}
+			if (ret2 && ret2.length)
+			{
+				for (i = 0, j = 0, len = ret2.length; i < len; i++)
+				{
+					ret2[j] = ret2[i];
+					if (!this.runtime.testOverlap(this.inst, ret2[i]))
+						j++;
+				}
+				if (j >= 1)
+				{
+					this.floorIsJumpthru = true;
+					return ret2[0];
+				}
+			}
+			return null;
+		}
+	};
+	behinstProto.tick = function ()
+	{
+	};
+	behinstProto.posttick = function ()
+	{
+		var dt = this.runtime.getDt(this.inst);
+		var mx, my, obstacle, mag, allover, i, len, j, oldx, oldy;
+		if (!this.jumpkey && !this.simjump)
+			this.jumped = false;
+		var left = this.leftkey || this.simleft;
+		var right = this.rightkey || this.simright;
+		var jumpkey = (this.jumpkey || this.simjump);
+		var jump = jumpkey && !this.jumped;
+		this.simleft = false;
+		this.simright = false;
+		this.simjump = false;
+		if (!this.enabled)
+			return;
+		if (this.ignoreInput)
+		{
+			left = false;
+			right = false;
+			jumpkey = false;
+			jump = false;
+		}
+		if (!jumpkey)
+			this.sustainTime = 0;
+		var lastFloor = this.lastFloorObject;
+		var floor_moved = false;
+		if (this.firstTick)
+		{
+			if (this.runtime.testOverlapSolid(this.inst) || this.runtime.testOverlapJumpThru(this.inst))
+			{
+				this.runtime.pushOutSolid(this.inst, -this.downx, -this.downy, 4, true);
+			}
+			this.firstTick = false;
+		}
+		if (lastFloor && this.dy === 0 && (lastFloor.y !== this.lastFloorY || lastFloor.x !== this.lastFloorX))
+		{
+			mx = (lastFloor.x - this.lastFloorX);
+			my = (lastFloor.y - this.lastFloorY);
+			this.inst.x += mx;
+			this.inst.y += my;
+			this.inst.set_bbox_changed();
+			this.lastFloorX = lastFloor.x;
+			this.lastFloorY = lastFloor.y;
+			floor_moved = true;
+			if (this.runtime.testOverlapSolid(this.inst))
+			{
+				this.runtime.pushOutSolid(this.inst, -mx, -my, Math.sqrt(mx * mx + my * my) * 2.5);
+			}
+		}
+		var floor_ = this.isOnFloor();
+		var collobj = this.runtime.testOverlapSolid(this.inst);
+		if (collobj)
+		{
+			if (this.inst.extra["inputPredicted"])
+			{
+				this.runtime.pushOutSolid(this.inst, -this.downx, -this.downy, 10, false);
+			}
+			else if (this.runtime.pushOutSolidNearest(this.inst, Math.max(this.inst.width, this.inst.height) / 2))
+			{
+				this.runtime.registerCollision(this.inst, collobj);
+			}
+			else
+				return;
+		}
+		if (floor_)
+		{
+			this.doubleJumped = false;		// reset double jump flags for next jump
+			this.canDoubleJump = false;
+			if (this.dy > 0)
+			{
+				if (!this.wasOnFloor)
+				{
+					this.runtime.pushInFractional(this.inst, -this.downx, -this.downy, floor_, 16);
+					this.wasOnFloor = true;
+				}
+				this.dy = 0;
+			}
+			if (lastFloor != floor_)
+			{
+				this.lastFloorObject = floor_;
+				this.lastFloorX = floor_.x;
+				this.lastFloorY = floor_.y;
+				this.runtime.registerCollision(this.inst, floor_);
+			}
+			else if (floor_moved)
+			{
+				collobj = this.runtime.testOverlapSolid(this.inst);
+				if (collobj)
+				{
+					this.runtime.registerCollision(this.inst, collobj);
+					if (mx !== 0)
+					{
+						if (mx > 0)
+							this.runtime.pushOutSolid(this.inst, -this.rightx, -this.righty);
+						else
+							this.runtime.pushOutSolid(this.inst, this.rightx, this.righty);
+					}
+					this.runtime.pushOutSolid(this.inst, -this.downx, -this.downy);
+				}
+			}
+		}
+		else
+		{
+			if (!jumpkey)
+				this.canDoubleJump = true;
+		}
+		if ((floor_ && jump) || (!floor_ && this.enableDoubleJump && jumpkey && this.canDoubleJump && !this.doubleJumped))
+		{
+			oldx = this.inst.x;
+			oldy = this.inst.y;
+			this.inst.x -= this.downx;
+			this.inst.y -= this.downy;
+			this.inst.set_bbox_changed();
+			if (!this.runtime.testOverlapSolid(this.inst))
+			{
+				this.sustainTime = this.jumpSustain;
+				this.runtime.trigger(cr.behaviors.Platform.prototype.cnds.OnJump, this.inst);
+				this.animMode = ANIMMODE_JUMPING;
+				this.dy = -this.jumpStrength;
+				jump = true;		// set in case is double jump
+				if (floor_)
+					this.jumped = true;
+				else
+					this.doubleJumped = true;
+			}
+			else
+				jump = false;
+			this.inst.x = oldx;
+			this.inst.y = oldy;
+			this.inst.set_bbox_changed();
+		}
+		if (!floor_)
+		{
+			if (jumpkey && this.sustainTime > 0)
+			{
+				this.dy = -this.jumpStrength;
+				this.sustainTime -= dt;
+			}
+			else
+			{
+				this.lastFloorObject = null;
+				this.dy += this.g * dt;
+				if (this.dy > this.maxFall)
+					this.dy = this.maxFall;
+			}
+			if (jump)
+				this.jumped = true;
+		}
+		this.wasOnFloor = !!floor_;
+		if (left == right)	// both up or both down
+		{
+			if (this.dx < 0)
+			{
+				this.dx += this.dec * dt;
+				if (this.dx > 0)
+					this.dx = 0;
+			}
+			else if (this.dx > 0)
+			{
+				this.dx -= this.dec * dt;
+				if (this.dx < 0)
+					this.dx = 0;
+			}
+		}
+		if (left && !right)
+		{
+			if (this.dx > 0)
+				this.dx -= (this.acc + this.dec) * dt;
+			else
+				this.dx -= this.acc * dt;
+		}
+		if (right && !left)
+		{
+			if (this.dx < 0)
+				this.dx += (this.acc + this.dec) * dt;
+			else
+				this.dx += this.acc * dt;
+		}
+		if (this.dx > this.maxspeed)
+			this.dx = this.maxspeed;
+		else if (this.dx < -this.maxspeed)
+			this.dx = -this.maxspeed;
+		var landed = false;
+		if (this.dx !== 0)
+		{
+			oldx = this.inst.x;
+			oldy = this.inst.y;
+			mx = this.dx * dt * this.rightx;
+			my = this.dx * dt * this.righty;
+			this.inst.x += this.rightx * (this.dx > 1 ? 1 : -1) - this.downx;
+			this.inst.y += this.righty * (this.dx > 1 ? 1 : -1) - this.downy;
+			this.inst.set_bbox_changed();
+			var is_jumpthru = false;
+			var slope_too_steep = this.runtime.testOverlapSolid(this.inst);
+			/*
+			if (!slope_too_steep && floor_)
+			{
+				slope_too_steep = this.runtime.testOverlapJumpThru(this.inst);
+				is_jumpthru = true;
+				if (slope_too_steep)
+				{
+					this.inst.x = oldx;
+					this.inst.y = oldy;
+					this.inst.set_bbox_changed();
+					if (this.runtime.testOverlap(this.inst, slope_too_steep))
+					{
+						slope_too_steep = null;
+						is_jumpthru = false;
+					}
+				}
+			}
+			*/
+			this.inst.x = oldx + mx;
+			this.inst.y = oldy + my;
+			this.inst.set_bbox_changed();
+			obstacle = this.runtime.testOverlapSolid(this.inst);
+			if (!obstacle && floor_)
+			{
+				obstacle = this.runtime.testOverlapJumpThru(this.inst);
+				if (obstacle)
+				{
+					this.inst.x = oldx;
+					this.inst.y = oldy;
+					this.inst.set_bbox_changed();
+					if (this.runtime.testOverlap(this.inst, obstacle))
+					{
+						obstacle = null;
+						is_jumpthru = false;
+					}
+					else
+						is_jumpthru = true;
+					this.inst.x = oldx + mx;
+					this.inst.y = oldy + my;
+					this.inst.set_bbox_changed();
+				}
+			}
+			if (obstacle)
+			{
+				var push_dist = Math.abs(this.dx * dt) + 2;
+				if (slope_too_steep || !this.runtime.pushOutSolid(this.inst, -this.downx, -this.downy, push_dist, is_jumpthru, obstacle))
+				{
+					this.runtime.registerCollision(this.inst, obstacle);
+					push_dist = Math.max(Math.abs(this.dx * dt * 2.5), 30);
+					if (!this.runtime.pushOutSolid(this.inst, this.rightx * (this.dx < 0 ? 1 : -1), this.righty * (this.dx < 0 ? 1 : -1), push_dist, false))
+					{
+						this.inst.x = oldx;
+						this.inst.y = oldy;
+						this.inst.set_bbox_changed();
+					}
+					else if (floor_ && !is_jumpthru && !this.floorIsJumpthru)
+					{
+						oldx = this.inst.x;
+						oldy = this.inst.y;
+						this.inst.x += this.downx;
+						this.inst.y += this.downy;
+						if (this.runtime.testOverlapSolid(this.inst))
+						{
+							if (!this.runtime.pushOutSolid(this.inst, -this.downx, -this.downy, 3, false))
+							{
+								this.inst.x = oldx;
+								this.inst.y = oldy;
+								this.inst.set_bbox_changed();
+							}
+						}
+						else
+						{
+							this.inst.x = oldx;
+							this.inst.y = oldy;
+							this.inst.set_bbox_changed();
+						}
+					}
+					if (!is_jumpthru)
+						this.dx = 0;	// stop
+				}
+				else if (!slope_too_steep && !jump && (Math.abs(this.dy) < Math.abs(this.jumpStrength / 4)))
+				{
+					this.dy = 0;
+					if (!floor_)
+						landed = true;
+				}
+			}
+			else
+			{
+				var newfloor = this.isOnFloor();
+				if (floor_ && !newfloor)
+				{
+					mag = Math.ceil(Math.abs(this.dx * dt)) + 2;
+					oldx = this.inst.x;
+					oldy = this.inst.y;
+					this.inst.x += this.downx * mag;
+					this.inst.y += this.downy * mag;
+					this.inst.set_bbox_changed();
+					if (this.runtime.testOverlapSolid(this.inst) || this.runtime.testOverlapJumpThru(this.inst))
+						this.runtime.pushOutSolid(this.inst, -this.downx, -this.downy, mag + 2, true);
+					else
+					{
+						this.inst.x = oldx;
+						this.inst.y = oldy;
+						this.inst.set_bbox_changed();
+					}
+				}
+				else if (newfloor && this.dy === 0)
+				{
+					this.runtime.pushInFractional(this.inst, -this.downx, -this.downy, newfloor, 16);
+				}
+			}
+		}
+		if (this.dy !== 0)
+		{
+			oldx = this.inst.x;
+			oldy = this.inst.y;
+			this.inst.x += this.dy * dt * this.downx;
+			this.inst.y += this.dy * dt * this.downy;
+			var newx = this.inst.x;
+			var newy = this.inst.y;
+			this.inst.set_bbox_changed();
+			collobj = this.runtime.testOverlapSolid(this.inst);
+			var fell_on_jumpthru = false;
+			if (!collobj && (this.dy > 0) && !floor_)
+			{
+				allover = this.fallthrough > 0 ? null : this.runtime.testOverlapJumpThru(this.inst, true);
+				if (allover && allover.length)
+				{
+					if (this.wasOverJumpthru)
+					{
+						this.inst.x = oldx;
+						this.inst.y = oldy;
+						this.inst.set_bbox_changed();
+						for (i = 0, j = 0, len = allover.length; i < len; i++)
+						{
+							allover[j] = allover[i];
+							if (!this.runtime.testOverlap(this.inst, allover[i]))
+								j++;
+						}
+						allover.length = j;
+						this.inst.x = newx;
+						this.inst.y = newy;
+						this.inst.set_bbox_changed();
+					}
+					if (allover.length >= 1)
+						collobj = allover[0];
+				}
+				fell_on_jumpthru = !!collobj;
+			}
+			if (collobj)
+			{
+				this.runtime.registerCollision(this.inst, collobj);
+				this.sustainTime = 0;
+				var push_dist = (fell_on_jumpthru ? Math.abs(this.dy * dt * 2.5 + 10) : Math.max(Math.abs(this.dy * dt * 2.5 + 10), 30));
+				if (!this.runtime.pushOutSolid(this.inst, this.downx * (this.dy < 0 ? 1 : -1), this.downy * (this.dy < 0 ? 1 : -1), push_dist, fell_on_jumpthru, collobj))
+				{
+					this.inst.x = oldx;
+					this.inst.y = oldy;
+					this.inst.set_bbox_changed();
+					this.wasOnFloor = true;		// prevent adjustment for unexpected floor landings
+					if (!fell_on_jumpthru)
+						this.dy = 0;	// stop
+				}
+				else
+				{
+					this.lastFloorObject = collobj;
+					this.lastFloorX = collobj.x;
+					this.lastFloorY = collobj.y;
+					this.floorIsJumpthru = fell_on_jumpthru;
+					if (fell_on_jumpthru)
+						landed = true;
+					this.dy = 0;	// stop
+				}
+			}
+		}
+		if (this.animMode !== ANIMMODE_FALLING && this.dy > 0 && !floor_)
+		{
+			this.runtime.trigger(cr.behaviors.Platform.prototype.cnds.OnFall, this.inst);
+			this.animMode = ANIMMODE_FALLING;
+		}
+		if (floor_ || landed)
+		{
+			if (this.animMode === ANIMMODE_FALLING || landed || (jump && this.dy === 0))
+			{
+				this.runtime.trigger(cr.behaviors.Platform.prototype.cnds.OnLand, this.inst);
+				if (this.dx === 0 && this.dy === 0)
+					this.animMode = ANIMMODE_STOPPED;
+				else
+					this.animMode = ANIMMODE_MOVING;
+			}
+			else
+			{
+				if (this.animMode !== ANIMMODE_STOPPED && this.dx === 0 && this.dy === 0)
+				{
+					this.runtime.trigger(cr.behaviors.Platform.prototype.cnds.OnStop, this.inst);
+					this.animMode = ANIMMODE_STOPPED;
+				}
+				if (this.animMode !== ANIMMODE_MOVING && (this.dx !== 0 || this.dy !== 0) && !jump)
+				{
+					this.runtime.trigger(cr.behaviors.Platform.prototype.cnds.OnMove, this.inst);
+					this.animMode = ANIMMODE_MOVING;
+				}
+			}
+		}
+		if (this.fallthrough > 0)
+			this.fallthrough--;
+		this.wasOverJumpthru = this.runtime.testOverlapJumpThru(this.inst);
+	};
+	function Cnds() {};
+	Cnds.prototype.IsMoving = function ()
+	{
+		return this.dx !== 0 || this.dy !== 0;
+	};
+	Cnds.prototype.CompareSpeed = function (cmp, s)
+	{
+		var speed = Math.sqrt(this.dx * this.dx + this.dy * this.dy);
+		return cr.do_cmp(speed, cmp, s);
+	};
+	Cnds.prototype.IsOnFloor = function ()
+	{
+		if (this.dy !== 0)
+			return false;
+		var ret = null;
+		var ret2 = null;
+		var i, len, j;
+		var oldx = this.inst.x;
+		var oldy = this.inst.y;
+		this.inst.x += this.downx;
+		this.inst.y += this.downy;
+		this.inst.set_bbox_changed();
+		ret = this.runtime.testOverlapSolid(this.inst);
+		if (!ret && this.fallthrough === 0)
+			ret2 = this.runtime.testOverlapJumpThru(this.inst, true);
+		this.inst.x = oldx;
+		this.inst.y = oldy;
+		this.inst.set_bbox_changed();
+		if (ret)		// was overlapping solid
+		{
+			return !this.runtime.testOverlap(this.inst, ret);
+		}
+		if (ret2 && ret2.length)
+		{
+			for (i = 0, j = 0, len = ret2.length; i < len; i++)
+			{
+				ret2[j] = ret2[i];
+				if (!this.runtime.testOverlap(this.inst, ret2[i]))
+					j++;
+			}
+			if (j >= 1)
+				return true;
+		}
+		return false;
+	};
+	Cnds.prototype.IsByWall = function (side)
+	{
+		var ret = false;
+		var oldx = this.inst.x;
+		var oldy = this.inst.y;
+		this.inst.x -= this.downx * 3;
+		this.inst.y -= this.downy * 3;
+		this.inst.set_bbox_changed();
+		if (this.runtime.testOverlapSolid(this.inst))
+		{
+			this.inst.x = oldx;
+			this.inst.y = oldy;
+			this.inst.set_bbox_changed();
+			return false;
+		}
+		if (side === 0)		// left
+		{
+			this.inst.x -= this.rightx * 2;
+			this.inst.y -= this.righty * 2;
+		}
+		else
+		{
+			this.inst.x += this.rightx * 2;
+			this.inst.y += this.righty * 2;
+		}
+		this.inst.set_bbox_changed();
+		ret = this.runtime.testOverlapSolid(this.inst);
+		this.inst.x = oldx;
+		this.inst.y = oldy;
+		this.inst.set_bbox_changed();
+		return ret;
+	};
+	Cnds.prototype.IsJumping = function ()
+	{
+		return this.dy < 0;
+	};
+	Cnds.prototype.IsFalling = function ()
+	{
+		return this.dy > 0;
+	};
+	Cnds.prototype.OnJump = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnFall = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnStop = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnMove = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnLand = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.IsDoubleJumpEnabled = function ()
+	{
+		return this.enableDoubleJump;
+	};
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.SetIgnoreInput = function (ignoring)
+	{
+		this.ignoreInput = ignoring;
+	};
+	Acts.prototype.SetMaxSpeed = function (maxspeed)
+	{
+		this.maxspeed = maxspeed;
+		if (this.maxspeed < 0)
+			this.maxspeed = 0;
+	};
+	Acts.prototype.SetAcceleration = function (acc)
+	{
+		this.acc = acc;
+		if (this.acc < 0)
+			this.acc = 0;
+	};
+	Acts.prototype.SetDeceleration = function (dec)
+	{
+		this.dec = dec;
+		if (this.dec < 0)
+			this.dec = 0;
+	};
+	Acts.prototype.SetJumpStrength = function (js)
+	{
+		this.jumpStrength = js;
+		if (this.jumpStrength < 0)
+			this.jumpStrength = 0;
+	};
+	Acts.prototype.SetGravity = function (grav)
+	{
+		if (this.g1 === grav)
+			return;		// no change
+		this.g = grav;
+		this.updateGravity();
+		if (this.runtime.testOverlapSolid(this.inst))
+		{
+			this.runtime.pushOutSolid(this.inst, this.downx, this.downy, 10);
+			this.inst.x += this.downx * 2;
+			this.inst.y += this.downy * 2;
+			this.inst.set_bbox_changed();
+		}
+		this.lastFloorObject = null;
+	};
+	Acts.prototype.SetMaxFallSpeed = function (mfs)
+	{
+		this.maxFall = mfs;
+		if (this.maxFall < 0)
+			this.maxFall = 0;
+	};
+	Acts.prototype.SimulateControl = function (ctrl)
+	{
+		switch (ctrl) {
+		case 0:		this.simleft = true;	break;
+		case 1:		this.simright = true;	break;
+		case 2:		this.simjump = true;	break;
+		}
+	};
+	Acts.prototype.SetVectorX = function (vx)
+	{
+		this.dx = vx;
+	};
+	Acts.prototype.SetVectorY = function (vy)
+	{
+		this.dy = vy;
+	};
+	Acts.prototype.SetGravityAngle = function (a)
+	{
+		a = cr.to_radians(a);
+		a = cr.clamp_angle(a);
+		if (this.ga === a)
+			return;		// no change
+		this.ga = a;
+		this.updateGravity();
+		this.lastFloorObject = null;
+	};
+	Acts.prototype.SetEnabled = function (en)
+	{
+		if (this.enabled !== (en === 1))
+		{
+			this.enabled = (en === 1);
+			if (!this.enabled)
+				this.lastFloorObject = null;
+		}
+	};
+	Acts.prototype.FallThrough = function ()
+	{
+		var oldx = this.inst.x;
+		var oldy = this.inst.y;
+		this.inst.x += this.downx;
+		this.inst.y += this.downy;
+		this.inst.set_bbox_changed();
+		var overlaps = this.runtime.testOverlapJumpThru(this.inst, false);
+		this.inst.x = oldx;
+		this.inst.y = oldy;
+		this.inst.set_bbox_changed();
+		if (!overlaps)
+			return;
+		this.fallthrough = 3;			// disable jumpthrus for 3 ticks (1 doesn't do it, 2 does, 3 to be on safe side)
+		this.lastFloorObject = null;
+	};
+	Acts.prototype.SetDoubleJumpEnabled = function (e)
+	{
+		this.enableDoubleJump = (e !== 0);
+	};
+	Acts.prototype.SetJumpSustain = function (s)
+	{
+		this.jumpSustain = s / 1000;		// convert to ms
+	};
+	behaviorProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.Speed = function (ret)
+	{
+		ret.set_float(Math.sqrt(this.dx * this.dx + this.dy * this.dy));
+	};
+	Exps.prototype.MaxSpeed = function (ret)
+	{
+		ret.set_float(this.maxspeed);
+	};
+	Exps.prototype.Acceleration = function (ret)
+	{
+		ret.set_float(this.acc);
+	};
+	Exps.prototype.Deceleration = function (ret)
+	{
+		ret.set_float(this.dec);
+	};
+	Exps.prototype.JumpStrength = function (ret)
+	{
+		ret.set_float(this.jumpStrength);
+	};
+	Exps.prototype.Gravity = function (ret)
+	{
+		ret.set_float(this.g);
+	};
+	Exps.prototype.GravityAngle = function (ret)
+	{
+		ret.set_float(cr.to_degrees(this.ga));
+	};
+	Exps.prototype.MaxFallSpeed = function (ret)
+	{
+		ret.set_float(this.maxFall);
+	};
+	Exps.prototype.MovingAngle = function (ret)
+	{
+		ret.set_float(cr.to_degrees(Math.atan2(this.dy, this.dx)));
+	};
+	Exps.prototype.VectorX = function (ret)
+	{
+		ret.set_float(this.dx);
+	};
+	Exps.prototype.VectorY = function (ret)
+	{
+		ret.set_float(this.dy);
+	};
+	Exps.prototype.JumpSustain = function (ret)
+	{
+		ret.set_float(this.jumpSustain * 1000);		// convert back to ms
 	};
 	behaviorProto.exps = new Exps();
 }());
@@ -25473,13 +28020,13 @@ cr.behaviors.Timer = function(runtime)
 }());
 ;
 ;
-cr.behaviors.bound = function(runtime)
+cr.behaviors.Turret = function(runtime)
 {
 	this.runtime = runtime;
 };
 (function ()
 {
-	var behaviorProto = cr.behaviors.bound.prototype;
+	var behaviorProto = cr.behaviors.Turret.prototype;
 	behaviorProto.Type = function(behavior, objtype)
 	{
 		this.behavior = behavior;
@@ -25489,101 +28036,7 @@ cr.behaviors.bound = function(runtime)
 	var behtypeProto = behaviorProto.Type.prototype;
 	behtypeProto.onCreate = function()
 	{
-	};
-	behaviorProto.Instance = function(type, inst)
-	{
-		this.type = type;
-		this.behavior = type.behavior;
-		this.inst = inst;				// associated object instance to modify
-		this.runtime = type.runtime;
-		this.mode = 0;
-	};
-	var behinstProto = behaviorProto.Instance.prototype;
-	behinstProto.onCreate = function()
-	{
-		this.mode = this.properties[0];	// 0 = origin, 1 = edge
-	};
-	behinstProto.tick = function ()
-	{
-	};
-	behinstProto.tick2 = function ()
-	{
-		this.inst.update_bbox();
-		var bbox = this.inst.bbox;
-		var layout = this.inst.layer.layout;
-		var changed = false;
-		if (this.mode === 0)	// origin
-		{
-			if (this.inst.x < 0)
-			{
-				this.inst.x = 0;
-				changed = true;
-			}
-			if (this.inst.y < 0)
-			{
-				this.inst.y = 0;
-				changed = true;
-			}
-			if (this.inst.x > layout.width)
-			{
-				this.inst.x = layout.width;
-				changed = true;
-			}
-			if (this.inst.y > layout.height)
-			{
-				this.inst.y = layout.height;
-				changed = true;
-			}
-		}
-		else
-		{
-			if (bbox.left < 0)
-			{
-				this.inst.x -= bbox.left;
-				changed = true;
-			}
-			if (bbox.top < 0)
-			{
-				this.inst.y -= bbox.top;
-				changed = true;
-			}
-			if (bbox.right > layout.width)
-			{
-				this.inst.x -= (bbox.right - layout.width);
-				changed = true;
-			}
-			if (bbox.bottom > layout.height)
-			{
-				this.inst.y -= (bbox.bottom - layout.height);
-				changed = true;
-			}
-		}
-		if (changed)
-			this.inst.set_bbox_changed();
-	};
-}());
-;
-;
-cr.behaviors.scrollto = function(runtime)
-{
-	this.runtime = runtime;
-	this.shakeMag = 0;
-	this.shakeStart = 0;
-	this.shakeEnd = 0;
-	this.shakeMode = 0;
-};
-(function ()
-{
-	var behaviorProto = cr.behaviors.scrollto.prototype;
-	behaviorProto.Type = function(behavior, objtype)
-	{
-		this.behavior = behavior;
-		this.objtype = objtype;
-		this.runtime = behavior.runtime;
-	};
-	var behtypeProto = behaviorProto.Type.prototype;
-	behtypeProto.onCreate = function()
-	{
+		this.targetTypes = [];						// object types to check for as targets
 	};
 	behaviorProto.Instance = function(type, inst)
 	{
@@ -25595,249 +28048,700 @@ cr.behaviors.scrollto = function(runtime)
 	var behinstProto = behaviorProto.Instance.prototype;
 	behinstProto.onCreate = function()
 	{
-		this.enabled = (this.properties[0] !== 0);
+		this.range = this.properties[0];
+		this.rateOfFire = this.properties[1];
+		this.rotateEnabled = (this.properties[2] !== 0);
+		this.rotateSpeed = cr.to_radians(this.properties[3]);
+		this.targetMode = this.properties[4];		// 0 = first, 1 = nearest
+		this.predictiveAim = (this.properties[5] !== 0);
+		this.projectileSpeed = this.properties[6];
+		this.enabled = (this.properties[7] !== 0);
+		this.useCollisionCells = (this.properties[8] !== 0);
+		this.lastCheckTime = 0;						// last time checked for targets in range
+		this.fireTimeCount = this.rateOfFire;		// counts up to rate of fire before shooting. starts in fully reloaded state
+		this.currentTarget = null;					// current target object
+		this.loadTargetUid = -1;
+		this.oldTargetX = 0;
+		this.oldTargetY = 0;
+		this.lastSpeeds = [0, 0, 0, 0];
+		this.speedsCount = 0;
+		this.firstTickWithTarget = true;
+		var self = this;
+		if (!this.recycled)
+		{
+			this.myDestroyCallback = function(inst) {
+										self.onInstanceDestroyed(inst);
+									};
+		}
+		this.runtime.addDestroyCallback(this.myDestroyCallback);
 	};
 	behinstProto.saveToJSON = function ()
 	{
-		return {
-			"smg": this.behavior.shakeMag,
-			"ss": this.behavior.shakeStart,
-			"se": this.behavior.shakeEnd,
-			"smd": this.behavior.shakeMode
+		var o = {
+			"r": this.range,
+			"rof": this.rateOfFire,
+			"re": this.rotateEnabled,
+			"rs": this.rotateSpeed,
+			"tm": this.targetMode,
+			"pa": this.predictiveAim,
+			"ps": this.projectileSpeed,
+			"en": this.enabled,
+			"lct": this.lastCheckTime,
+			"ftc": this.fireTimeCount,
+			"target": (this.currentTarget ? this.currentTarget.uid : -1),
+			"ox": this.oldTargetX,
+			"oy": this.oldTargetY,
+			"ls": this.lastSpeeds,
+			"sc": this.speedsCount,
+			"targs": []
 		};
+		var i, len;
+		for (i = 0, len = this.type.targetTypes.length; i < len; i++)
+		{
+			o["targs"].push(this.type.targetTypes[i].sid);
+		}
+		return o;
 	};
 	behinstProto.loadFromJSON = function (o)
 	{
-		this.behavior.shakeMag = o["smg"];
-		this.behavior.shakeStart = o["ss"];
-		this.behavior.shakeEnd = o["se"];
-		this.behavior.shakeMode = o["smd"];
+		this.range = o["r"];
+		this.rateOfFire = o["rof"];
+		this.rotateEnabled = o["re"];
+		this.rotateSpeed = o["rs"];
+		this.targetMode = o["tm"];
+		this.predictiveAim = o["pa"];
+		this.projectileSpeed = o["ps"];
+		this.enabled = o["en"];
+		this.lastCheckTime = o["lct"];
+		this.fireTimeCount = o["ftc"] || 0;		// not in <r154
+		this.loadTargetUid = o["target"];
+		this.oldTargetX = o["ox"];
+		this.oldTargetY = o["oy"];
+		this.lastSpeeds = o["ls"];
+		this.speedsCount = o["sc"];
+		cr.clearArray(this.type.targetTypes);
+		var i, len, t;
+		for (i = 0, len = o["targs"].length; i < len; i++)
+		{
+			t = this.runtime.getObjectTypeBySid(o["targs"][i]);
+			if (t)
+				this.type.targetTypes.push(t);
+		}
+	};
+	behinstProto.afterLoad = function ()
+	{
+		if (this.loadTargetUid === -1)
+			this.currentTarget = null;
+		else
+			this.currentTarget = this.runtime.getObjectByUID(this.loadTargetUid);
+	};
+	behinstProto.onInstanceDestroyed = function (inst)
+	{
+		if (this.currentTarget == inst)
+			this.currentTarget = null;
+	};
+	behinstProto.onDestroy = function ()
+	{
+		this.currentTarget = null;
+		this.runtime.removeDestroyCallback(this.myDestroyCallback);
+	};
+	behinstProto.addSpeed = function (s)
+	{
+		if (this.speedsCount < 4)
+		{
+			this.lastSpeeds[this.speedsCount] = s;
+			this.speedsCount++;
+		}
+		else
+		{
+			this.lastSpeeds.shift();
+			this.lastSpeeds.push(s);
+		}
+	};
+	behinstProto.getSpeed = function ()
+	{
+		var ret = 0;
+		var i = 0;
+		for ( ; i < this.speedsCount; i++)
+		{
+			ret += this.lastSpeeds[i];
+		}
+		return ret / this.speedsCount;
+	};
+	behinstProto.isInRange = function (obj_)
+	{
+		var inst = this.inst;
+		var dx = obj_.x - inst.x;
+		var dy = obj_.y - inst.y;
+		return dx * dx + dy * dy <= this.range * this.range;
+	};
+	var tmpRect = new cr.rect(0, 0, 0, 0);
+	var candidates = [];
+	behinstProto.lookForFirstTarget = function ()
+	{
+		var i, len, rinst;
+		tmpRect.left = this.inst.x - this.range;
+		tmpRect.top = this.inst.y - this.range;
+		tmpRect.right = this.inst.x + this.range;
+		tmpRect.bottom = this.inst.y + this.range;
+		if (this.useCollisionCells)
+		{
+			this.runtime.getTypesCollisionCandidates(null, this.type.targetTypes, tmpRect, candidates);
+		}
+		else
+		{
+			for (i = 0, len = this.type.targetTypes.length; i < len; ++i)
+			{
+				cr.appendArray(candidates, this.type.targetTypes[i].instances);
+			}
+		}
+		for (i = 0, len = candidates.length; i < len; ++i)
+		{
+			rinst = candidates[i];
+			if (this.isInRange(rinst))
+			{
+				this.currentTarget = rinst;
+				cr.clearArray(candidates);
+				return;
+			}
+		}
+		cr.clearArray(candidates);
+	};
+	behinstProto.lookForNearestTarget = function ()
+	{
+		var i, len, rinst, dist, dx, dy;
+		var myx = this.inst.x;
+		var myy = this.inst.y;
+		var closest = this.range * this.range;
+		this.currentTarget = null;
+		tmpRect.left = myx - this.range;
+		tmpRect.top = myy - this.range;
+		tmpRect.right = myx + this.range;
+		tmpRect.bottom = myy + this.range;
+		if (this.useCollisionCells)
+		{
+			this.runtime.getTypesCollisionCandidates(null, this.type.targetTypes, tmpRect, candidates);
+		}
+		else
+		{
+			for (i = 0, len = this.type.targetTypes.length; i < len; ++i)
+			{
+				cr.appendArray(candidates, this.type.targetTypes[i].instances);
+			}
+		}
+		for (i = 0, len = candidates.length; i < len; ++i)
+		{
+			rinst = candidates[i];
+			dx = myx - rinst.x;
+			dy = myy - rinst.y;
+			dist = dx * dx + dy * dy;
+			if (dist < closest)
+			{
+				this.currentTarget = rinst;
+				closest = dist;
+			}
+		}
+		candidates.length = 0;
 	};
 	behinstProto.tick = function ()
 	{
-	};
-	function getScrollToBehavior(inst)
-	{
-		var i, len, binst;
-		for (i = 0, len = inst.behavior_insts.length; i < len; ++i)
-		{
-			binst = inst.behavior_insts[i];
-			if (binst.behavior instanceof cr.behaviors.scrollto)
-				return binst;
-		}
-		return null;
-	};
-	behinstProto.tick2 = function ()
-	{
+		var dt = this.runtime.getDt(this.inst);
+		var nowtime = this.runtime.kahanTime.sum;
+		var inst = this.inst;
 		if (!this.enabled)
 			return;
-		var all = this.behavior.my_instances.valuesRef();
-		var sumx = 0, sumy = 0;
-		var i, len, binst, count = 0;
-		for (i = 0, len = all.length; i < len; i++)
+		if (this.currentTarget && !this.isInRange(this.currentTarget))
 		{
-			binst = getScrollToBehavior(all[i]);
-			if (!binst || !binst.enabled)
-				continue;
-			sumx += all[i].x;
-			sumy += all[i].y;
-			++count;
+			this.currentTarget = null;
+			this.speedsCount = 0;
+			this.firstTickWithTarget = true;
 		}
-		var layout = this.inst.layer.layout;
-		var now = this.runtime.kahanTime.sum;
-		var offx = 0, offy = 0;
-		if (now >= this.behavior.shakeStart && now < this.behavior.shakeEnd)
+		if (nowtime >= this.lastCheckTime + 0.1)
 		{
-			var mag = this.behavior.shakeMag * Math.min(this.runtime.timescale, 1);
-			if (this.behavior.shakeMode === 0)
-				mag *= 1 - (now - this.behavior.shakeStart) / (this.behavior.shakeEnd - this.behavior.shakeStart);
-			var a = Math.random() * Math.PI * 2;
-			var d = Math.random() * mag;
-			offx = Math.cos(a) * d;
-			offy = Math.sin(a) * d;
+			this.lastCheckTime = nowtime;
+			if (this.targetMode === 0 && !this.currentTarget)
+			{
+				this.lookForFirstTarget();
+				if (this.currentTarget)
+				{
+					this.speedsCount = 0;
+					this.firstTickWithTarget = true;
+					this.oldTargetX = this.currentTarget.x;
+					this.oldTargetY = this.currentTarget.y;
+					this.runtime.trigger(cr.behaviors.Turret.prototype.cnds.OnTargetAcquired, this.inst);
+				}
+			}
+			else if (this.targetMode === 1)
+			{
+				var oldTarget = this.currentTarget;
+				this.lookForNearestTarget();
+				if (this.currentTarget && this.currentTarget !== oldTarget)
+				{
+					this.speedsCount = 0;
+					this.firstTickWithTarget = true;
+					this.oldTargetX = this.currentTarget.x;
+					this.oldTargetY = this.currentTarget.y;
+					this.runtime.trigger(cr.behaviors.Turret.prototype.cnds.OnTargetAcquired, this.inst);
+				}
+			}
 		}
-		layout.scrollToX(sumx / count + offx);
-		layout.scrollToY(sumy / count + offy);
+		this.fireTimeCount += dt;
+		if (this.currentTarget)
+		{
+			var targetAngle = cr.angleTo(inst.x, inst.y, this.currentTarget.x, this.currentTarget.y);
+			if (this.predictiveAim)
+			{
+				var Gx = inst.x;
+				var Gy = inst.y;
+				var Px = this.currentTarget.x;
+				var Py = this.currentTarget.y;
+				var h = cr.angleTo(Px, Py, this.oldTargetX, this.oldTargetY);
+				if (!this.firstTickWithTarget)
+					this.addSpeed(cr.distanceTo(Px, Py, this.oldTargetX, this.oldTargetY) / dt);
+				var s = this.getSpeed();
+				var q = Py - Gy;
+				var r = Px - Gx;
+				var w = (s * Math.sin(h) * (Gx - Px) - s * Math.cos(h) * (Gy - Py)) / this.projectileSpeed;
+				var a = (Math.asin(w / Math.sqrt(q * q + r * r)) - Math.atan2(q, -r)) + Math.PI;
+				if (!isNaN(a))
+					targetAngle = a;
+			}
+			if (this.rotateEnabled)
+			{
+				inst.angle = cr.angleRotate(inst.angle, targetAngle, this.rotateSpeed * dt);
+				inst.set_bbox_changed();
+			}
+			if ((this.fireTimeCount >= this.rateOfFire) &&
+				cr.to_degrees(cr.angleDiff(inst.angle, targetAngle)) <= 0.1 &&
+				(!this.predictiveAim || this.speedsCount >= 4))
+			{
+				this.fireTimeCount -= this.rateOfFire;
+				if (this.fireTimeCount >= this.rateOfFire)
+					this.fireTimeCount = 0;
+				this.runtime.trigger(cr.behaviors.Turret.prototype.cnds.OnShoot, this.inst);
+			}
+			this.oldTargetX = this.currentTarget.x;
+			this.oldTargetY = this.currentTarget.y;
+			this.firstTickWithTarget = false;
+		}
+		if (this.fireTimeCount > this.rateOfFire)
+			this.fireTimeCount = this.rateOfFire;
 	};
-	function Acts() {};
-	Acts.prototype.Shake = function (mag, dur, mode)
+	function Cnds() {};
+	Cnds.prototype.HasTarget = function ()
 	{
-		this.behavior.shakeMag = mag;
-		this.behavior.shakeStart = this.runtime.kahanTime.sum;
-		this.behavior.shakeEnd = this.behavior.shakeStart + dur;
-		this.behavior.shakeMode = mode;
+		return !!this.currentTarget;
+	};
+	Cnds.prototype.OnShoot = function ()
+	{
+		return true;
+	};
+	Cnds.prototype.OnTargetAcquired = function ()
+	{
+		return true;
+	};
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.AcquireTarget = function (obj_)
+	{
+		if (!obj_)
+			return;
+		var instances = obj_.getCurrentSol().getObjects();
+		var i, len, inst;
+		for (i = 0, len = instances.length; i < len; ++i)
+		{
+			inst = instances[i];
+			if (this.currentTarget !== inst && this.isInRange(inst))
+			{
+				this.currentTarget = inst;
+				this.speedsCount = 0;
+				this.firstTickWithTarget = true;
+				this.oldTargetX = this.currentTarget.x;
+				this.oldTargetY = this.currentTarget.y;
+				this.runtime.trigger(cr.behaviors.Turret.prototype.cnds.OnTargetAcquired, this.inst);
+				break;
+			}
+		}
+	};
+	Acts.prototype.AddTarget = function (obj_)
+	{
+		var targetTypes = this.type.targetTypes;
+		if (targetTypes.indexOf(obj_) !== -1)
+			return;
+		var i, len, t;
+		for (i = 0, len = targetTypes.length; i < len; i++)
+		{
+			t = targetTypes[i];
+			if (t.is_family && t.members.indexOf(obj_) !== -1)
+				return;
+		}
+		targetTypes.push(obj_);
+	};
+	Acts.prototype.ClearTargets = function ()
+	{
+		cr.clearArray(this.type.targetTypes);
+	};
+	Acts.prototype.UnacquireTarget = function ()
+	{
+		this.currentTarget = null;
+		this.speedsCount = 0;
+		this.firstTickWithTarget = true;
 	};
 	Acts.prototype.SetEnabled = function (e)
 	{
 		this.enabled = (e !== 0);
 	};
+	Acts.prototype.SetRange = function (r)
+	{
+		this.range = r;
+	};
+	Acts.prototype.SetRateOfFire = function (r)
+	{
+		this.rateOfFire = r;
+	};
+	Acts.prototype.SetRotate = function (r)
+	{
+		this.rotateEnabled = (r !== 0);
+	};
+	Acts.prototype.SetRotateSpeed = function (r)
+	{
+		this.rotateSpeed = cr.to_radians(r);
+	};
+	Acts.prototype.SetTargetMode = function (s)
+	{
+		this.targetMode = s;
+	};
+	Acts.prototype.SetPredictiveAim = function (s)
+	{
+		this.predictiveAim = (s !== 0);
+	};
+	Acts.prototype.SetProjectileSpeed = function (s)
+	{
+		this.projectileSpeed = s;
+	};
+	behaviorProto.acts = new Acts();
+	function Exps() {};
+	Exps.prototype.TargetUID = function (ret)
+	{
+		ret.set_int(this.currentTarget ? this.currentTarget.uid : 0);
+	};
+	Exps.prototype.Range = function (ret)
+	{
+		ret.set_float(this.range);
+	};
+	Exps.prototype.RateOfFire = function (ret)
+	{
+		ret.set_float(this.rateOfFire);
+	};
+	Exps.prototype.RotateSpeed = function (ret)
+	{
+		ret.set_float(cr.to_degrees(this.rotateSpeed));
+	};
+	behaviorProto.exps = new Exps();
+}());
+;
+;
+cr.behaviors.jumpthru = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var behaviorProto = cr.behaviors.jumpthru.prototype;
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+	var behtypeProto = behaviorProto.Type.prototype;
+	behtypeProto.onCreate = function()
+	{
+	};
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+	};
+	var behinstProto = behaviorProto.Instance.prototype;
+	behinstProto.onCreate = function()
+	{
+		this.inst.extra["jumpthruEnabled"] = (this.properties[0] !== 0);
+	};
+	behinstProto.tick = function ()
+	{
+	};
+	function Cnds() {};
+	Cnds.prototype.IsEnabled = function ()
+	{
+		return this.inst.extra["jumpthruEnabled"];
+	};
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.SetEnabled = function (e)
+	{
+		this.inst.extra["jumpthruEnabled"] = !!e;
+	};
+	behaviorProto.acts = new Acts();
+}());
+;
+;
+cr.behaviors.solid = function(runtime)
+{
+	this.runtime = runtime;
+};
+(function ()
+{
+	var behaviorProto = cr.behaviors.solid.prototype;
+	behaviorProto.Type = function(behavior, objtype)
+	{
+		this.behavior = behavior;
+		this.objtype = objtype;
+		this.runtime = behavior.runtime;
+	};
+	var behtypeProto = behaviorProto.Type.prototype;
+	behtypeProto.onCreate = function()
+	{
+	};
+	behaviorProto.Instance = function(type, inst)
+	{
+		this.type = type;
+		this.behavior = type.behavior;
+		this.inst = inst;				// associated object instance to modify
+		this.runtime = type.runtime;
+	};
+	var behinstProto = behaviorProto.Instance.prototype;
+	behinstProto.onCreate = function()
+	{
+		this.inst.extra["solidEnabled"] = (this.properties[0] !== 0);
+	};
+	behinstProto.tick = function ()
+	{
+	};
+	function Cnds() {};
+	Cnds.prototype.IsEnabled = function ()
+	{
+		return this.inst.extra["solidEnabled"];
+	};
+	behaviorProto.cnds = new Cnds();
+	function Acts() {};
+	Acts.prototype.SetEnabled = function (e)
+	{
+		this.inst.extra["solidEnabled"] = !!e;
+	};
 	behaviorProto.acts = new Acts();
 }());
 cr.getObjectRefTable = function () { return [
+	cr.plugins_.Audio,
+	cr.plugins_.Arr,
 	cr.plugins_.Browser,
+	cr.plugins_.Button,
 	cr.plugins_.Function,
+	cr.plugins_.gamepad,
 	cr.plugins_.Keyboard,
+	cr.plugins_.List,
+	cr.plugins_.Mouse,
+	cr.plugins_.NodeWebkit,
 	cr.plugins_.Particles,
-	cr.plugins_.Rex_Function,
 	cr.plugins_.Sprite,
 	cr.plugins_.Spritefont2,
+	cr.plugins_.Text,
 	cr.plugins_.TiledBg,
-	cr.plugins_.Touch,
-	cr.plugins_.Audio,
-	cr.plugins_.video,
 	cr.plugins_.WebStorage,
-	cr.behaviors.bound,
-	cr.behaviors.Timer,
+	cr.behaviors.jumpthru,
+	cr.behaviors.solid,
 	cr.behaviors.Sin,
-	cr.behaviors.Bullet,
-	cr.behaviors.Flash,
 	cr.behaviors.Pin,
+	cr.behaviors.Platform,
 	cr.behaviors.Fade,
-	cr.behaviors.scrollto,
+	cr.behaviors.Bullet,
+	cr.behaviors.Timer,
+	cr.behaviors.Turret,
+	cr.behaviors.LOS,
+	cr.behaviors.Flash,
 	cr.system_object.prototype.cnds.OnLayoutStart,
-	cr.system_object.prototype.acts.SetTimescale,
-	cr.system_object.prototype.acts.SetLayerBackground,
-	cr.system_object.prototype.exps.rgb,
-	cr.system_object.prototype.acts.SetLayerVisible,
-	cr.plugins_.Function.prototype.acts.CallFunction,
-	cr.plugins_.Spritefont2.prototype.acts.SetText,
-	cr.system_object.prototype.exps.projectversion,
-	cr.system_object.prototype.exps.newline,
-	cr.plugins_.Sprite.prototype.acts.SetAnimFrame,
-	cr.behaviors.Pin.prototype.acts.Pin,
-	cr.system_object.prototype.exps["int"],
-	cr.plugins_.WebStorage.prototype.exps.LocalValue,
-	cr.plugins_.Sprite.prototype.acts.SetAnim,
-	cr.behaviors.Sin.prototype.acts.SetActive,
-	cr.plugins_.Audio.prototype.acts.PreloadByName,
-	cr.plugins_.Sprite.prototype.cnds.PickByUID,
-	cr.system_object.prototype.exps.choose,
-	cr.plugins_.Sprite.prototype.acts.SetSize,
-	cr.plugins_.Sprite.prototype.acts.SetPos,
-	cr.plugins_.Sprite.prototype.acts.SetAngle,
-	cr.plugins_.Spritefont2.prototype.cnds.PickByUID,
-	cr.system_object.prototype.cnds.PickAll,
-	cr.plugins_.Sprite.prototype.acts.StopAnim,
-	cr.plugins_.Audio.prototype.cnds.PreloadsComplete,
-	cr.plugins_.Audio.prototype.acts.PlayByName,
-	cr.plugins_.WebStorage.prototype.cnds.LocalStorageExists,
-	cr.system_object.prototype.cnds.TriggerOnce,
-	cr.plugins_.WebStorage.prototype.acts.StoreLocal,
-	cr.plugins_.Spritefont2.prototype.acts.AppendText,
-	cr.system_object.prototype.acts.SetVar,
-	cr.system_object.prototype.cnds.Compare,
-	cr.plugins_.Audio.prototype.acts.Stop,
-	cr.plugins_.Audio.prototype.acts.SetSilent,
-	cr.plugins_.Sprite.prototype.acts.SetVisible,
-	cr.plugins_.video.prototype.acts.Play,
-	cr.plugins_.video.prototype.acts.SetVisible,
-	cr.plugins_.video.prototype.acts.Destroy,
-	cr.system_object.prototype.cnds.IsGroupActive,
-	cr.plugins_.Function.prototype.cnds.OnFunction,
-	cr.system_object.prototype.acts.Wait,
-	cr.system_object.prototype.exps.ceil,
-	cr.system_object.prototype.exps.wallclocktime,
-	cr.plugins_.Sprite.prototype.acts.SetY,
-	cr.system_object.prototype.exps.lerp,
-	cr.plugins_.Sprite.prototype.exps.Y,
-	cr.system_object.prototype.acts.CreateObject,
-	cr.plugins_.Sprite.prototype.exps.X,
-	cr.plugins_.Particles.prototype.acts.ZMoveToObject,
-	cr.plugins_.Particles.prototype.acts.SetRate,
-	cr.plugins_.Function.prototype.exps.Param,
-	cr.plugins_.Particles.prototype.acts.SetEffectParam,
-	cr.system_object.prototype.exps.tokenat,
-	cr.plugins_.Spritefont2.prototype.acts.SetY,
-	cr.plugins_.Spritefont2.prototype.exps.Y,
-	cr.plugins_.video.prototype.cnds.HasEnded,
-	cr.plugins_.Audio.prototype.acts.StopAll,
-	cr.system_object.prototype.acts.RestartLayout,
-	cr.system_object.prototype.cnds.LayerVisible,
-	cr.plugins_.Touch.prototype.cnds.OnTapGesture,
-	cr.plugins_.Sprite.prototype.exps.AnimationFrame,
-	cr.plugins_.Sprite.prototype.cnds.CompareFrame,
 	cr.system_object.prototype.acts.SetGroupActive,
-	cr.system_object.prototype.exps.getbit,
-	cr.plugins_.Sprite.prototype.acts.MoveToLayer,
-	cr.plugins_.Sprite.prototype.acts.ZMoveToObject,
-	cr.plugins_.Touch.prototype.cnds.IsTouchingObject,
-	cr.plugins_.Sprite.prototype.acts.SetOpacity,
-	cr.plugins_.Touch.prototype.cnds.OnTapGestureObject,
+	cr.system_object.prototype.acts.SetLayerBackground,
+	cr.system_object.prototype.exps.choose,
+	cr.system_object.prototype.exps.rgb,
+	cr.system_object.prototype.acts.SetVar,
+	cr.plugins_.WebStorage.prototype.exps.SessionValue,
+	cr.system_object.prototype.acts.CreateObject,
+	cr.plugins_.Mouse.prototype.acts.SetCursor,
+	cr.plugins_.Function.prototype.acts.CallFunction,
 	cr.system_object.prototype.cnds.CompareVar,
-	cr.behaviors.Timer.prototype.acts.StartTimer,
-	cr.plugins_.TiledBg.prototype.cnds.PickByUID,
-	cr.plugins_.Spritefont2.prototype.acts.SetVisible,
-	cr.plugins_.TiledBg.prototype.acts.SetVisible,
-	cr.system_object.prototype.acts.ResetGlobals,
-	cr.plugins_.Rex_Function.prototype.acts.InjectJSFunctionObjects,
-	cr.system_object.prototype.exps.clamp,
-	cr.plugins_.Sprite.prototype.exps.AnimationFrameCount,
-	cr.plugins_.Sprite.prototype.acts.SetMirrored,
-	cr.system_object.prototype.acts.SubVar,
-	cr.system_object.prototype.exps.setbit,
 	cr.system_object.prototype.cnds.Else,
-	cr.system_object.prototype.cnds.Every,
-	cr.system_object.prototype.exps.fps,
-	cr.system_object.prototype.exps.cpuutilisation,
-	cr.system_object.prototype.exps.objectcount,
+	cr.plugins_.WebStorage.prototype.cnds.SessionStorageExists,
+	cr.plugins_.WebStorage.prototype.acts.StoreSession,
+	cr.plugins_.Audio.prototype.acts.PlayByName,
+	cr.plugins_.Audio.prototype.acts.SetSilent,
+	cr.system_object.prototype.cnds.IsPreview,
+	cr.system_object.prototype.cnds.IsGroupActive,
+	cr.plugins_.Sprite.prototype.acts.MoveToBottom,
 	cr.plugins_.Sprite.prototype.acts.SetInstanceVar,
-	cr.plugins_.Sprite.prototype.cnds.CompareInstanceVar,
-	cr.behaviors.Flash.prototype.acts.StopFlashing,
-	cr.plugins_.Sprite.prototype.acts.SetCollisions,
-	cr.behaviors.Flash.prototype.acts.Flash,
-	cr.plugins_.Sprite.prototype.acts.AddInstanceVar,
-	cr.system_object.prototype.exps.round,
-	cr.plugins_.Sprite.prototype.cnds.OnCreated,
+	cr.plugins_.Sprite.prototype.acts.SetMirrored,
+	cr.plugins_.Sprite.prototype.acts.SetFlipped,
+	cr.plugins_.Sprite.prototype.acts.SetBoolInstanceVar,
+	cr.plugins_.Keyboard.prototype.cnds.IsKeyDown,
+	cr.plugins_.gamepad.prototype.cnds.IsButtonDown,
+	cr.plugins_.gamepad.prototype.cnds.CompareAxis,
+	cr.behaviors.Platform.prototype.acts.SimulateControl,
+	cr.plugins_.Keyboard.prototype.cnds.OnKey,
+	cr.plugins_.gamepad.prototype.cnds.OnButtonDown,
+	cr.system_object.prototype.cnds.Compare,
+	cr.plugins_.Sprite.prototype.exps.Count,
+	cr.behaviors.Platform.prototype.acts.FallThrough,
 	cr.plugins_.Sprite.prototype.cnds.IsOverlapping,
-	cr.plugins_.Browser.prototype.acts.Vibrate,
-	cr.behaviors.scrollto.prototype.acts.Shake,
-	cr.system_object.prototype.acts.AddVar,
-	cr.behaviors.Bullet.prototype.acts.SetSpeed,
-	cr.behaviors.Bullet.prototype.acts.SetGravity,
-	cr.system_object.prototype.exps.abs,
-	cr.plugins_.Sprite.prototype.exps.Width,
-	cr.plugins_.Sprite.prototype.exps.Height,
-	cr.plugins_.Sprite.prototype.exps.UID,
-	cr.behaviors.Timer.prototype.cnds.OnTimer,
-	cr.behaviors.Timer.prototype.acts.StopTimer,
-	cr.behaviors.Timer.prototype.exps.Duration,
-	cr.behaviors.Timer.prototype.exps.CurrentTime,
+	cr.plugins_.Sprite.prototype.cnds.CompareInstanceVar,
+	cr.system_object.prototype.cnds.Every,
 	cr.plugins_.Sprite.prototype.acts.SubInstanceVar,
 	cr.plugins_.Sprite.prototype.acts.Spawn,
-	cr.behaviors.Fade.prototype.acts.SetWaitTime,
-	cr.plugins_.Spritefont2.prototype.exps.UID,
-	cr.behaviors.Bullet.prototype.exps.Speed,
-	cr.plugins_.Touch.prototype.cnds.IsInTouch,
-	cr.plugins_.Sprite.prototype.acts.MoveAtAngle,
-	cr.system_object.prototype.exps.angle,
-	cr.plugins_.Touch.prototype.exps.X,
-	cr.plugins_.Touch.prototype.exps.Y,
-	cr.system_object.prototype.exps.distance,
-	cr.system_object.prototype.exps.dt,
-	cr.system_object.prototype.exps.cos,
-	cr.system_object.prototype.exps.sin,
-	cr.plugins_.Touch.prototype.cnds.OnTouchStart,
-	cr.plugins_.Touch.prototype.cnds.OnTouchEnd,
-	cr.plugins_.Sprite.prototype.cnds.CompareX,
-	cr.plugins_.Sprite.prototype.acts.StartAnim,
-	cr.system_object.prototype.cnds.PickByComparison,
-	cr.system_object.prototype.cnds.ForEach,
-	cr.system_object.prototype.cnds.PickRandom,
-	cr.system_object.prototype.exps.random,
-	cr.plugins_.Sprite.prototype.cnds.OnAnyAnimFinished,
-	cr.plugins_.Sprite.prototype.acts.Destroy,
-	cr.behaviors.Bullet.prototype.cnds.CompareTravelled,
-	cr.behaviors.Pin.prototype.cnds.IsPinned,
-	cr.plugins_.Sprite.prototype.cnds.PickDistance,
-	cr.plugins_.Sprite.prototype.acts.SetWidth,
+	cr.plugins_.Sprite.prototype.acts.SetAngle,
+	cr.plugins_.Sprite.prototype.exps.Angle,
+	cr.behaviors.Bullet.prototype.acts.SetSpeed,
+	cr.system_object.prototype.exps["int"],
+	cr.system_object.prototype.exps.tokenat,
+	cr.system_object.prototype.cnds.TriggerOnce,
 	cr.plugins_.Sprite.prototype.cnds.OnCollision,
-	cr.plugins_.Sprite.prototype.acts.SetPosToObject,
-	cr.behaviors.Fade.prototype.acts.StartFade,
-	cr.behaviors.Fade.prototype.cnds.OnFadeOutEnd,
-	cr.system_object.prototype.cnds.IsPreview,
-	cr.plugins_.Keyboard.prototype.cnds.IsKeyDown,
-	cr.plugins_.Keyboard.prototype.cnds.OnKey,
+	cr.plugins_.Sprite.prototype.exps.X,
+	cr.plugins_.Sprite.prototype.exps.Y,
+	cr.plugins_.Spritefont2.prototype.acts.SetText,
+	cr.plugins_.Spritefont2.prototype.acts.SetScale,
+	cr.plugins_.Sprite.prototype.acts.Destroy,
+	cr.system_object.prototype.acts.AddVar,
+	cr.behaviors.Flash.prototype.acts.Flash,
+	cr.plugins_.Function.prototype.cnds.OnFunction,
+	cr.system_object.prototype.cnds.PickByComparison,
+	cr.system_object.prototype.cnds.PickRandom,
+	cr.behaviors.Pin.prototype.acts.Pin,
+	cr.behaviors.Turret.prototype.acts.AddTarget,
+	cr.plugins_.Spritefont2.prototype.acts.SetInstanceVar,
+	cr.behaviors.Turret.prototype.acts.SetRotateSpeed,
+	cr.system_object.prototype.exps["float"],
+	cr.plugins_.Sprite.prototype.acts.SetAnimFrame,
+	cr.plugins_.Sprite.prototype.acts.SetSize,
+	cr.behaviors.Turret.prototype.exps.RotateSpeed,
+	cr.system_object.prototype.acts.Wait,
+	cr.plugins_.Sprite.prototype.acts.SetWidth,
+	cr.system_object.prototype.exps.ceil,
+	cr.behaviors.Turret.prototype.acts.SetPredictiveAim,
+	cr.behaviors.Turret.prototype.acts.SetProjectileSpeed,
+	cr.plugins_.Spritefont2.prototype.cnds.CompareInstanceVar,
+	cr.plugins_.Spritefont2.prototype.acts.Destroy,
+	cr.plugins_.Sprite.prototype.cnds.CompareY,
+	cr.system_object.prototype.acts.SubVar,
+	cr.plugins_.Sprite.prototype.acts.RotateTowardAngle,
+	cr.plugins_.Sprite.prototype.exps.Width,
+	cr.plugins_.Sprite.prototype.cnds.OnAnimFinished,
+	cr.plugins_.Sprite.prototype.cnds.IsOnScreen,
+	cr.plugins_.Sprite.prototype.exps.AnimationFrame,
+	cr.behaviors.Fade.prototype.acts.SetFadeOutTime,
+	cr.plugins_.Text.prototype.acts.SetText,
+	cr.system_object.prototype.exps.fps,
+	cr.system_object.prototype.exps.objectcount,
+	cr.system_object.prototype.exps.round,
+	cr.system_object.prototype.exps.cpuutilisation,
+	cr.system_object.prototype.cnds.EveryTick,
+	cr.system_object.prototype.exps.clamp,
+	cr.plugins_.Sprite.prototype.acts.SetAnim,
+	cr.system_object.prototype.cnds.PickAll,
+	cr.plugins_.Sprite.prototype.acts.MoveToTop,
+	cr.behaviors.Platform.prototype.cnds.IsMoving,
+	cr.behaviors.Platform.prototype.cnds.IsOnFloor,
+	cr.plugins_.Audio.prototype.acts.Stop,
+	cr.plugins_.Sprite.prototype.cnds.IsBetweenAngles,
+	cr.behaviors.Platform.prototype.cnds.IsFalling,
+	cr.plugins_.Audio.prototype.acts.StopAll,
+	cr.system_object.prototype.acts.GoToLayout,
+	cr.plugins_.gamepad.prototype.exps.GamepadCount,
+	cr.system_object.prototype.acts.SetLayerVisible,
+	cr.system_object.prototype.acts.SetTimescale,
+	cr.system_object.prototype.cnds.OnLayoutEnd,
+	cr.system_object.prototype.acts.ResetGlobals,
+	cr.behaviors.Platform.prototype.cnds.OnLand,
+	cr.system_object.prototype.exps.layoutname,
+	cr.plugins_.Sprite.prototype.cnds.OnCreated,
+	cr.plugins_.Sprite.prototype.acts.AddInstanceVar,
+	cr.behaviors.Bullet.prototype.exps.Speed,
+	cr.behaviors.Bullet.prototype.cnds.CompareSpeed,
+	cr.behaviors.Bullet.prototype.acts.Bounce,
+	cr.behaviors.Bullet.prototype.acts.SetDistanceTravelled,
+	cr.behaviors.Bullet.prototype.exps.DistanceTravelled,
+	cr.behaviors.Bullet.prototype.cnds.CompareTravelled,
+	cr.plugins_.Text.prototype.acts.SetFontSize,
+	cr.plugins_.Arr.prototype.acts.SetXY,
+	cr.plugins_.Arr.prototype.exps.At,
+	cr.plugins_.Audio.prototype.acts.SetMuted,
+	cr.plugins_.Text.prototype.acts.Destroy,
+	cr.plugins_.Text.prototype.acts.SetSize,
+	cr.plugins_.Text.prototype.acts.SetPos,
+	cr.plugins_.Text.prototype.exps.Text,
+	cr.system_object.prototype.exps.newline,
+	cr.plugins_.WebStorage.prototype.acts.StoreLocal,
+	cr.plugins_.Arr.prototype.exps.AsJSON,
+	cr.plugins_.Sprite.prototype.acts.SetVisible,
+	cr.system_object.prototype.exps.projectversion,
+	cr.plugins_.Button.prototype.acts.SetCSSStyle,
+	cr.plugins_.List.prototype.acts.SetCSSStyle,
+	cr.plugins_.Button.prototype.acts.SetVisible,
+	cr.plugins_.Text.prototype.exps.UID,
+	cr.system_object.prototype.cnds.For,
+	cr.plugins_.Spritefont2.prototype.cnds.PickByUID,
+	cr.plugins_.Spritefont2.prototype.acts.AppendText,
+	cr.system_object.prototype.exps.loopindex,
+	cr.plugins_.NodeWebkit.prototype.acts.WindowMaximize,
+	cr.plugins_.Audio.prototype.acts.PreloadByName,
+	cr.plugins_.Arr.prototype.acts.Clear,
 	cr.plugins_.WebStorage.prototype.acts.ClearLocal,
-	cr.plugins_.WebStorage.prototype.acts.ClearSession,
-	cr.system_object.prototype.acts.ResetPersisted
+	cr.plugins_.Browser.prototype.acts.Alert,
+	cr.plugins_.Arr.prototype.acts.JSONDownload,
+	cr.plugins_.Button.prototype.acts.SetChecked,
+	cr.plugins_.WebStorage.prototype.cnds.LocalStorageExists,
+	cr.plugins_.Arr.prototype.acts.JSONLoad,
+	cr.plugins_.WebStorage.prototype.exps.LocalValue,
+	cr.system_object.prototype.cnds.LayerVisible,
+	cr.plugins_.Mouse.prototype.cnds.OnObjectClicked,
+	cr.system_object.prototype.acts.GoToLayoutByName,
+	cr.system_object.prototype.cnds.PickByEvaluate,
+	cr.plugins_.Browser.prototype.acts.ExecJs,
+	cr.plugins_.gamepad.prototype.cnds.OnButtonUp,
+	cr.plugins_.Text.prototype.cnds.PickByUID,
+	cr.plugins_.List.prototype.acts.Select,
+	cr.plugins_.List.prototype.exps.SelectedIndex,
+	cr.system_object.prototype.cnds.PickOverlappingPoint,
+	cr.plugins_.Text.prototype.acts.AppendText,
+	cr.plugins_.Button.prototype.cnds.IsChecked,
+	cr.plugins_.Mouse.prototype.cnds.IsOverObject,
+	cr.plugins_.Button.prototype.acts.SetBlur,
+	cr.plugins_.Button.prototype.cnds.OnClicked,
+	cr.plugins_.List.prototype.cnds.CompareSelection,
+	cr.plugins_.Button.prototype.cnds.CompareInstanceVar,
+	cr.plugins_.List.prototype.cnds.OnClicked,
+	cr.plugins_.gamepad.prototype.cnds.OnAnyButtonDown,
+	cr.plugins_.Audio.prototype.cnds.IsSilent,
+	cr.plugins_.Sprite.prototype.acts.SetOpacity,
+	cr.plugins_.Sprite.prototype.acts.SetPos,
+	cr.system_object.prototype.exps.dt,
+	cr.behaviors.Turret.prototype.acts.SetRange,
+	cr.plugins_.Sprite.prototype.acts.SetEffect,
+	cr.behaviors.Platform.prototype.acts.SetMaxSpeed,
+	cr.behaviors.Timer.prototype.acts.StartTimer,
+	cr.behaviors.Timer.prototype.cnds.OnTimer,
+	cr.behaviors.Platform.prototype.acts.SetIgnoreInput,
+	cr.behaviors.Turret.prototype.acts.SetRotate,
+	cr.plugins_.Sprite.prototype.acts.ZMoveToObject,
+	cr.behaviors.Platform.prototype.acts.SetDoubleJumpEnabled,
+	cr.behaviors.Pin.prototype.cnds.IsPinned,
+	cr.behaviors.Platform.prototype.acts.SetEnabled,
+	cr.plugins_.Sprite.prototype.cnds.IsVisible,
+	cr.plugins_.Sprite.prototype.cnds.OnDestroyed,
+	cr.behaviors.LOS.prototype.cnds.HasLOSToObject,
+	cr.plugins_.Sprite.prototype.cnds.PickDistance,
+	cr.system_object.prototype.exps.random,
+	cr.plugins_.Sprite.prototype.cnds.CompareX,
+	cr.behaviors.Platform.prototype.exps.VectorX,
+	cr.behaviors.Platform.prototype.cnds.IsJumping,
+	cr.system_object.prototype.exps.distance
 ];};

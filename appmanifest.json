@@ -1,9 +1,9 @@
 ﻿{
-	"name": "BIRD_CONFLICT",
-	"short_name": "BIRD_CONFLICT",
+	"name": "DUEL",
+	"short_name": "DUEL",
 	"start_url": "index.html",
 	"display": "fullscreen",
-	"orientation": "portrait",
+	"orientation": "landscape",
 	"icons": [{
 		"src": "icon-16.png",
 		"sizes": "16x16",
