@@ -20369,8 +20369,9 @@ cr.getObjectRefTable = function () { return [
 	cr.plugins_.Sprite.prototype.acts.SetAnimFrame,
 	cr.system_object.prototype.exps.random,
 	cr.plugins_.Sprite.prototype.exps.AnimationFrameCount,
-	cr.system_object.prototype.acts.Wait,
+	cr.plugins_.ValerypopoffJSPlugin.prototype.cnds.AllScriptsLoaded,
 	cr.plugins_.ValerypopoffJSPlugin.prototype.acts.Call,
+	cr.system_object.prototype.acts.Wait,
 	cr.plugins_.Sprite.prototype.cnds.OnCollision,
 	cr.system_object.prototype.cnds.CompareVar,
 	cr.behaviors.Bullet.prototype.acts.SetSpeed,
@@ -20406,6 +20407,5 @@ cr.getObjectRefTable = function () { return [
 	cr.system_object.prototype.exps.viewportright,
 	cr.plugins_.Sprite.prototype.acts.SetY,
 	cr.system_object.prototype.exps.clamp,
-	cr.system_object.prototype.exps.dt,
-	cr.plugins_.ValerypopoffJSPlugin.prototype.cnds.AllScriptsLoaded
+	cr.system_object.prototype.exps.dt
 ];};
