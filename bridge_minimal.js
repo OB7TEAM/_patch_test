@@ -10,15 +10,6 @@ function joingroup()
 
 function recommend()
 {
-	vkBridge.send('VKWebAppRecommend')
-  .then((data) => { 
-    if (data.result) {
-      // Мини-приложение порекомендовано
-    }
-  })
-  .catch((error) => {
-    // Ошибка
-    console.log(error);
-  });
+	vkBridge.send('VKWebAppShowInviteBox');
 }
 
