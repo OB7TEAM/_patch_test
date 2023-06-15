@@ -1,16 +1,16 @@
 function init()
 {
-	bridge.send('VKWebAppInit').catch((error) => {console.log(error);});
+	vkBridge.send('VKWebAppInit').catch((error) => {console.log(error);});
 }
 
 function joingroup()
 {
-	bridge.send('VKWebAppJoinGroup', {group_id: 218386519}).catch((error) => {console.log(error);});
+	vkBridge.send('VKWebAppJoinGroup', {group_id: 218386519}).catch((error) => {console.log(error);});
 }
 
 function recommend()
 {
-	bridge.send('VKWebAppRecommend')
+	vkBridge.send('VKWebAppRecommend')
   .then((data) => { 
     if (data.result) {
       // Мини-приложение порекомендовано
